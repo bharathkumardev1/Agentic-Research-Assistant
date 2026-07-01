@@ -1,3 +1,38 @@
+Metadata-Version: 2.4
+Name: agentic-research-assistant
+Version: 0.1.0
+Summary: Multi-agent (Claude + LangGraph) system that reads and synthesizes research papers over a FAISS-backed RAG pipeline, producing citation-backed summaries.
+Author-email: Bharath Kumar <bharathkumardev1@users.noreply.github.com>
+License: MIT
+Project-URL: Homepage, https://github.com/bharathkumardev1/agentic-research-assistant
+Project-URL: Repository, https://github.com/bharathkumardev1/agentic-research-assistant
+Project-URL: Issues, https://github.com/bharathkumardev1/agentic-research-assistant/issues
+Keywords: llm,rag,agents,langgraph,claude,anthropic,faiss,research
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: anthropic>=0.40
+Requires-Dist: langgraph>=0.2
+Requires-Dist: faiss-cpu>=1.7.4
+Requires-Dist: sentence-transformers>=2.6
+Requires-Dist: pypdf>=4.0
+Requires-Dist: arxiv>=2.1
+Requires-Dist: pydantic>=2.5
+Requires-Dist: pydantic-settings>=2.1
+Requires-Dist: numpy>=1.24
+Requires-Dist: tenacity>=8.2
+Requires-Dist: rich>=13.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4; extra == "dev"
+Requires-Dist: pytest-cov>=4.1; extra == "dev"
+Requires-Dist: ruff>=0.4; extra == "dev"
+Dynamic: license-file
+
 # Agentic Research Assistant
 
 A small team of AI agents that reads research papers and answers questions about them, with citations. It uses Claude for the reasoning, LangGraph to coordinate the agents, and FAISS for retrieval. Given a question, it pulls the relevant passages, writes a grounded summary, checks its own work, and goes back for more evidence if the answer is thin. The final output pulls out the methods, the key findings, and the open research gaps, with every claim tied back to a source.

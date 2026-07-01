@@ -1,0 +1,2 @@
+[console_scripts]
+research-assistant = research_assistant.cli:main
