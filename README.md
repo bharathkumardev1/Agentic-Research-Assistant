@@ -2,7 +2,7 @@
 
 A small team of AI agents that reads research papers and answers questions about them, with citations. It uses Claude for the reasoning, LangGraph to coordinate the agents, and FAISS for retrieval. Given a question, it pulls the relevant passages, writes a grounded summary, checks its own work, and goes back for more evidence if the answer is thin. The final output pulls out the methods, the key findings, and the open research gaps, with every claim tied back to a source.
 
-[![CI](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml)
+[![CI](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
