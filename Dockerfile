@@ -1,11 +1,15 @@
 # Agentic Research Assistant
 #
-# Build:  docker build -t research-assistant .
-# Demo:   docker run --rm research-assistant demo
-# Live:   docker run --rm --env-file .env research-assistant research "your question" --index-dir /data/index
+# Build:        docker build -t research-assistant .
+# Run the API:  docker run --rm -p 8000:8000 research-assistant
+#               then: curl http://localhost:8000/health
+# Run the CLI:  docker run --rm research-assistant research-assistant demo
+# Live API:     docker run --rm -p 8000:8000 --env-file .env research-assistant
 #
-# The image ships with the offline demo data pre-baked, so `docker run
-# research-assistant demo` works immediately with no volumes or env vars.
+# The image ships with the offline demo data pre-baked, so the web service
+# answers questions immediately after `docker run`, no volumes or env vars
+# required. Set ANTHROPIC_API_KEY (via --env-file .env) for real Claude
+# answers; the service still starts fine without it, in dry-run mode.
 
 FROM python:3.11-slim AS base
 
@@ -31,7 +35,9 @@ USER appuser
 
 ENV PYTHONUNBUFFERED=1 \
     LOG_LEVEL=INFO \
-    INDEX_DIR=/app/data/index
+    INDEX_DIR=/app/data/index \
+    PORT=8000
 
-ENTRYPOINT ["research-assistant"]
-CMD ["demo"]
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn research_assistant.webapp:app --host 0.0.0.0 --port ${PORT}"]
