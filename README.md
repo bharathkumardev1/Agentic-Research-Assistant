@@ -6,7 +6,6 @@ A small team of AI agents that reads research papers and answers questions about
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[![CI](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml)
 
 ## Why I built it
 
