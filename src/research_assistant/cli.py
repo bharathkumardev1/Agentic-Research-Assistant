@@ -18,6 +18,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from .logging_utils import configure_logging
+
+configure_logging()
+
 _SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "sample_papers"
 _SAMPLE_QUESTION = (
     "How do retrieval-augmented and multi-agent approaches improve the "
@@ -151,6 +155,13 @@ def _run_research(question: str, settings, dry_run: bool, output: Optional[str],
     if output:
         Path(output).write_text(result.report, encoding="utf-8")
         console.print(f"\n[green]Report written to {output}[/]")
+
+    if not dry_run and hasattr(client, "call_count"):
+        console.print(
+            f"\n[dim]API calls: {client.call_count} \u00b7 "
+            f"input tokens: {client.input_tokens} \u00b7 "
+            f"output tokens: {client.output_tokens}[/]"
+        )
     return result
 
 
