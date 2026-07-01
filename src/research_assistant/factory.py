@@ -39,6 +39,7 @@ def build_client(settings: Settings, dry_run: bool = False) -> LLMClient:
     return ClaudeClient(
         api_key=settings.require_api_key(),
         default_max_tokens=settings.max_tokens,
+        max_calls=settings.max_api_calls,
     )
 
 
