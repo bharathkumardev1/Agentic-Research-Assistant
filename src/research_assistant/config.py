@@ -1,3 +1,4 @@
+
 """Application configuration, loaded from environment variables / ``.env``.
 
 All knobs live here so the agents and pipeline stay free of magic numbers.
@@ -32,6 +33,11 @@ class Settings(BaseSettings):
     max_tokens: int = Field(default=2048, ge=256)
     max_api_calls: int = Field(
         default=40, ge=1, description="Hard cap on Claude calls per pipeline run."
+    )
+    web_api_key: str = Field(
+        default="",
+        alias="WEB_API_KEY",
+        description="If set, the web service requires this key in the X-API-Key header.",
     )
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
 

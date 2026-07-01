@@ -1,0 +1,25 @@
+# Render Blueprint for the Agentic Research Assistant web service.
+#
+# Deploy: go to https://dashboard.render.com/blueprints, connect this GitHub
+# repo, and Render will read this file and set everything up automatically.
+# Free tier works fine for a demo (it sleeps after inactivity and wakes on
+# the next request, which takes ~30-60s the first time).
+#
+# To answer with real Claude instead of the offline stub, set ANTHROPIC_API_KEY
+# in the Render dashboard under this service's Environment tab, it's marked
+# sync: false below so it's never stored in this file or in git.
+
+services:
+  - type: web
+    name: agentic-research-assistant
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: WEB_API_KEY
+        sync: false
