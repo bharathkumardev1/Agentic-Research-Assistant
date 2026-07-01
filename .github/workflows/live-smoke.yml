@@ -1,0 +1,43 @@
+name: Live API smoke test
+
+# Manual only, never runs automatically on push or PR. This calls the real
+# Claude API and costs a small amount of money, so it's opt-in.
+#
+# To use this: add ANTHROPIC_API_KEY as a repository secret
+# (Settings -> Secrets and variables -> Actions -> New repository secret),
+# then trigger this workflow from the Actions tab -> "Live API smoke test"
+# -> "Run workflow".
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Run one live research question
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EMBEDDING_BACKEND: hashing
+          MAX_ITERATIONS: "1"
+          MAX_API_CALLS: "5"
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "No ANTHROPIC_API_KEY secret set, skipping live smoke test."
+            echo "Add one under Settings -> Secrets and variables -> Actions to enable this."
+            exit 0
+          fi
+          research-assistant demo --use-api
