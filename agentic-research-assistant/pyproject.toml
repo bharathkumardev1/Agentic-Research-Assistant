@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-research-assistant"
+version = "0.1.0"
+description = "Multi-agent (Claude + LangGraph) system that reads and synthesizes research papers over a FAISS-backed RAG pipeline, producing citation-backed summaries."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Bharath Kumar", email = "bharathkumardev1@users.noreply.github.com" }]
+keywords = [
+    "llm",
+    "rag",
+    "agents",
+    "langgraph",
+    "claude",
+    "anthropic",
+    "faiss",
+    "research",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "anthropic>=0.40",
+    "langgraph>=0.2",
+    "faiss-cpu>=1.7.4",
+    "sentence-transformers>=2.6",
+    "pypdf>=4.0",
+    "arxiv>=2.1",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "numpy>=1.24",
+    "tenacity>=8.2",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/bharathkumardev1/agentic-research-assistant"
+Repository = "https://github.com/bharathkumardev1/agentic-research-assistant"
+Issues = "https://github.com/bharathkumardev1/agentic-research-assistant/issues"
+
+[project.scripts]
+research-assistant = "research_assistant.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+research_assistant = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+# Keep typing.Optional/List forms: with Python 3.9 support, Pydantic evaluates
+# annotations at runtime and `X | None` / builtin generics are not safe there.
+ignore = ["E501", "UP006", "UP007", "UP035", "UP045"]

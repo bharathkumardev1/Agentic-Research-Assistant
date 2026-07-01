@@ -1,0 +1,36 @@
+Retrieval-Augmented Generation for Scientific Question Answering
+
+Authors: A. Rivera, J. Okafor, M. Lindqvist (synthetic example paper)
+
+Abstract
+We study retrieval-augmented generation (RAG) for answering questions over a
+corpus of scientific articles. Standard large language models hallucinate
+citations and conflate findings across papers. We propose SciRAG, a pipeline
+that grounds every generated sentence in retrieved passages and attaches
+inline citation markers. On a benchmark of 1,200 expert-written questions,
+SciRAG reduces unsupported claims by 63% relative to a non-retrieval baseline
+while improving answer correctness.
+
+Methods
+SciRAG splits each paper into overlapping passages of roughly 1,000 characters
+and embeds them with a contrastively trained dense encoder. At query time we
+retrieve the top-k passages by cosine similarity from a FAISS index and prompt
+the generator to cite passage identifiers. A lightweight verifier re-checks
+each sentence against its cited passage and flags sentences whose claims are
+not entailed by the citation. Flagged sentences trigger a second retrieval
+round with a query expanded by the verifier.
+
+Results
+SciRAG attains 81.4% answer correctness versus 68.0% for the closed-book
+baseline and 74.2% for a single-pass RAG system without verification. The
+verifier's re-retrieval step contributes a further 4.1 points. Human raters
+judged 92% of SciRAG citations to be relevant, compared with 61% for the
+single-pass system. Latency increases by 1.7x due to the verification round.
+
+Limitations
+The verifier itself can miss subtle unsupported inferences, and the approach
+assumes the answer is contained in the corpus. SciRAG was evaluated only on
+English-language biomedical and machine-learning papers; generalisation to
+other domains and languages is untested. The dense encoder was not stress
+tested on out-of-distribution terminology, and no ablation isolates the effect
+of chunk size on retrieval quality.
