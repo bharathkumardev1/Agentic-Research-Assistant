@@ -19,6 +19,10 @@ from typing import Any, Dict, List, Protocol
 
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from .logging_utils import get_logger
+
+logger = get_logger("llm")
+
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _RETRYABLE_HINTS = (
     "rate", "overloaded", "timeout", "timed out", "connection",
@@ -66,9 +70,18 @@ def extract_json(text: str) -> Dict[str, Any]:
 
 
 class ClaudeClient:
-    """Retrying client for the Anthropic Messages API."""
+    """Retrying client for the Anthropic Messages API.
 
-    def __init__(self, api_key: str, default_max_tokens: int = 2048) -> None:
+    Tracks cumulative token usage and enforces a hard cap on the number of
+    API calls a single instance will make (``max_calls``, default 40).
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        default_max_tokens: int = 2048,
+        max_calls: int = 40,
+    ) -> None:
         try:
             from anthropic import Anthropic
         except ImportError as exc:  # pragma: no cover - import guard
@@ -81,6 +94,10 @@ class ClaudeClient:
             raise LLMError("An Anthropic API key is required for ClaudeClient.")
         self._client = Anthropic(api_key=api_key)
         self.default_max_tokens = default_max_tokens
+        self.max_calls = max_calls
+        self.call_count = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
 
     @retry(
         retry=retry_if_exception(_is_retryable),
@@ -98,6 +115,14 @@ class ClaudeClient:
         temperature: float = 0.2,
     ) -> str:
         """Return the concatenated text content of a single-turn completion."""
+        if self.call_count >= self.max_calls:
+            raise LLMError(
+                f"Hit the per-run budget of {self.max_calls} API calls. "
+                "This guards against runaway spend; raise `max_calls` on "
+                "ClaudeClient if a legitimate run genuinely needs more."
+            )
+        self.call_count += 1
+        logger.info("anthropic call %d/%d model=%s", self.call_count, self.max_calls, model)
         message = self._client.messages.create(
             model=model,
             max_tokens=max_tokens or self.default_max_tokens,
@@ -105,6 +130,10 @@ class ClaudeClient:
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )
+        usage = getattr(message, "usage", None)
+        if usage is not None:
+            self.input_tokens += getattr(usage, "input_tokens", 0) or 0
+            self.output_tokens += getattr(usage, "output_tokens", 0) or 0
         return "".join(
             block.text for block in message.content if getattr(block, "type", "") == "text"
         ).strip()

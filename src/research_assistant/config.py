@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     summarizer_model: str = Field(default="claude-sonnet-4-6")
     evaluator_model: str = Field(default="claude-opus-4-8")
     max_tokens: int = Field(default=2048, ge=256)
+    max_api_calls: int = Field(
+        default=40, ge=1, description="Hard cap on Claude calls per pipeline run."
+    )
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
 
     # --- Embeddings / RAG --------------------------------------------------
