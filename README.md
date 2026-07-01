@@ -2,7 +2,7 @@
 
 > A multi-agent system (Claude + LangGraph: **retriever**, **summarizer**, **evaluator**) that autonomously reads and synthesizes research papers over a **FAISS-backed RAG pipeline**, producing **citation-backed** summaries and extracting **methods**, **key findings**, and **research gaps**.
 
-[![CI](https://github.com/your-username/agentic-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml)
+[![CI](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
