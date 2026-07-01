@@ -1,0 +1,36 @@
+Dense Retrieval with Contrastive Pretraining for Literature Search
+
+Authors: H. Nakamura, S. Adeyemi, T. Varga (synthetic example paper)
+
+Abstract
+Effective retrieval is the foundation of any grounded question-answering
+system. We present ConText, a dense passage retriever pretrained with a
+contrastive objective over 8 million scientific abstracts. ConText improves
+top-5 retrieval recall on a literature-search benchmark from 0.62 to 0.79 over
+a sparse BM25 baseline, and transfers to unseen subfields with minimal
+degradation.
+
+Methods
+We mine positive passage pairs from citation links and section co-occurrence,
+and sample hard negatives using an in-batch strategy refreshed every epoch.
+Passages are encoded into 384-dimensional embeddings that are L2-normalised so
+that inner-product search recovers cosine similarity. We index embeddings with
+a flat inner-product structure for exact search and evaluate approximate
+variants for scale. Retrieval quality is measured with recall@k and mean
+reciprocal rank.
+
+Results
+ConText raises recall@5 to 0.79 and MRR to 0.61, outperforming BM25 (0.62 /
+0.44) and a general-purpose dense encoder (0.71 / 0.52). Hard-negative
+refreshing accounts for roughly half of the improvement over the general
+encoder. On three held-out subfields, recall drops by only 3 points on average,
+indicating reasonable domain transfer. Exact inner-product search remains fast
+enough for interactive use at the evaluated corpus size.
+
+Limitations
+Contrastive pretraining is computationally expensive and depends on the quality
+of mined citation links, which are noisy in emerging fields. ConText was not
+evaluated on full-text retrieval, only abstracts, and the approximate index
+variants trade a small amount of recall for speed in ways that were not
+characterised for very large corpora. No experiment measured calibration of the
+similarity scores themselves.

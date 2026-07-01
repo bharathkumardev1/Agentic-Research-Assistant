@@ -1,0 +1,36 @@
+Multi-Agent Reflection Improves Long-Form Reasoning
+
+Authors: P. Mensah, L. Conti, R. Bhattacharya (synthetic example paper)
+
+Abstract
+We investigate whether decomposing a reasoning task across cooperating agents
+improves the quality of long-form answers. Our framework, ReflectGraph, runs a
+proposer agent that drafts an answer, a critic agent that evaluates grounding
+and completeness, and a controller that decides whether to revise. Across
+three reasoning benchmarks, ReflectGraph improves factual accuracy by 11 points
+and reduces logical inconsistencies by 38% compared with single-pass
+generation.
+
+Methods
+ReflectGraph is implemented as a directed graph of agents with a bounded
+revision loop. The proposer produces a structured answer with explicit claims.
+The critic scores each claim for support and coverage and, when coverage is
+low, emits a refined sub-question. The controller terminates when the critic
+reports sufficiency or a maximum of three revision cycles is reached. All
+agents share a common evidence pool so revisions accumulate context rather than
+discarding it.
+
+Results
+On scientific synthesis tasks, ReflectGraph reaches 0.86 coverage as judged by
+experts, versus 0.71 for a single proposer. The bounded loop converges in 1.8
+revisions on average. Disabling the critic removes most of the gain, confirming
+that explicit evaluation, not merely additional generation, drives the
+improvement. The controller's stopping rule avoids the degenerate behaviour of
+endlessly rewriting confident-but-wrong answers.
+
+Limitations
+The critic can be over-confident and occasionally halts before coverage is
+truly adequate. Costs scale with the number of revision cycles, and the method
+assumes the proposer and critic do not share the same systematic blind spots.
+Experiments did not measure robustness to adversarial or contradictory evidence
+in the shared pool, and human evaluation was limited to a single annotator pool.
