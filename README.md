@@ -42,7 +42,8 @@ flowchart LR
     E -->|sufficient| C[Compose report]
     E -.->|needs more| R
     C --> OUT([Markdown report])
-    R <--> VS[(FAISS index)]```
+    R <--> VS[(FAISS index)]
+```
 
 In plain text:
 
