@@ -16,11 +16,13 @@ from typing import Callable, List, Optional
 from ..agents.evaluator import EvaluatorAgent
 from ..agents.retriever import RetrieverAgent
 from ..agents.summarizer import SummarizerAgent
+from ..logging_utils import get_logger, new_run_id
 from ..report import render_report
 from ..schemas import ResearchResult, RetrievedChunk
 from .state import ResearchState
 
 EventHook = Optional[Callable[[str, dict], None]]
+logger = get_logger("workflow")
 
 
 def _merge_retrieved(
@@ -51,9 +53,11 @@ def build_graph(
     def retrieve_node(state: ResearchState) -> dict:
         query = state["current_query"]
         emit("retrieve", {"query": query, "iteration": state.get("iteration", 0)})
+        logger.info("retrieve: query=%r iteration=%s", query, state.get("iteration", 0))
         found = retriever.retrieve(query)
         merged = _merge_retrieved(state.get("retrieved", []), found)
         emit("retrieved", {"new": len(found), "total": len(merged)})
+        logger.debug("retrieved: new=%d total=%d", len(found), len(merged))
         return {
             "retrieved": merged,
             "queries": [*state.get("queries", []), query],
@@ -61,6 +65,7 @@ def build_graph(
 
     def summarize_node(state: ResearchState) -> dict:
         emit("summarize", {"chunks": len(state.get("retrieved", []))})
+        logger.info("summarize: chunks=%d", len(state.get("retrieved", [])))
         summary, sources = summarizer.summarize(
             state["question"], state.get("retrieved", [])
         )
@@ -79,6 +84,12 @@ def build_graph(
                 "coverage": evaluation.coverage_score,
             },
         )
+        logger.info(
+            "evaluate: iteration=%d sufficiency=%s coverage=%.2f",
+            iteration,
+            evaluation.sufficiency,
+            evaluation.coverage_score,
+        )
         update: dict = {"evaluation": evaluation, "iteration": iteration}
         if evaluation.sufficiency == "needs_more" and evaluation.refined_query:
             update["current_query"] = evaluation.refined_query
@@ -93,6 +104,7 @@ def build_graph(
             queries=state.get("queries", []),
         )
         emit("compose", {"length": len(report)})
+        logger.info("compose: report_length=%d", len(report))
         return {"report": report}
 
     def route(state: ResearchState) -> str:
@@ -131,12 +143,26 @@ class ResearchPipeline:
         evaluator: EvaluatorAgent,
         max_iterations: int = 3,
         on_event: EventHook = None,
+        timeout_seconds: float = 300.0,
     ) -> None:
         self.max_iterations = max_iterations
+        self.timeout_seconds = timeout_seconds
         self.app = build_graph(retriever, summarizer, evaluator, on_event=on_event)
 
     def run(self, question: str) -> ResearchResult:
-        """Execute the full agentic loop for ``question``."""
+        """Execute the full agentic loop for ``question``.
+
+        Logs a warning if the run exceeds ``timeout_seconds`` of wall-clock
+        time. This is a soft cost/runaway guard: the loop is already bounded
+        by ``max_iterations``, so this mainly flags unexpectedly slow API
+        calls for monitoring. It does not interrupt an in-progress run.
+        """
+        import time
+
+        run_id = new_run_id()
+        started = time.monotonic()
+        logger.info("run start: run_id=%s question=%r", run_id, question)
+
         initial: ResearchState = {
             "question": question,
             "current_query": question,
@@ -147,8 +173,21 @@ class ResearchPipeline:
         }
         # Allow enough supersteps for max_iterations full loops plus compose.
         final = self.app.invoke(
-            initial, config={"recursion_limit": 4 * self.max_iterations + 5}
+            initial,
+            config={
+                "recursion_limit": 4 * self.max_iterations + 5,
+            },
         )
+
+        elapsed = time.monotonic() - started
+        if elapsed > self.timeout_seconds:
+            logger.warning(
+                "run exceeded soft timeout: run_id=%s elapsed=%.1fs limit=%.1fs",
+                run_id,
+                elapsed,
+                self.timeout_seconds,
+            )
+        logger.info("run done: run_id=%s elapsed=%.1fs iterations=%s", run_id, elapsed, final.get("iteration", 0))
         return ResearchResult(
             question=question,
             summary=final["summary"],
