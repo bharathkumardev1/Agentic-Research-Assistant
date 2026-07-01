@@ -37,13 +37,12 @@ Here is the flow. The interesting part is the arrow that loops back: the evaluat
 ```mermaid
 flowchart LR
     Q([Research question]) --> R[Retriever]
-    R -->|top-k chunks| S[Summarizer<br/>Claude Sonnet]
-    S -->|cited summary| E[Evaluator<br/>Claude Opus]
+    R -->|top-k chunks| S[Summarizer]
+    S -->|cited summary| E[Evaluator]
     E -->|sufficient| C[Compose report]
-    E -.->|needs more,<br/>refined query| R
+    E -.->|needs more| R
     C --> OUT([Markdown report])
-    R <--> VS[(FAISS index)]
-```
+    R <--> VS[(FAISS index)]```
 
 In plain text:
 
