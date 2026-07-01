@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from .config import get_settings
@@ -79,6 +80,10 @@ def _require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
 class ResearchRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
 
+@app.get("/")
+def root() -> RedirectResponse:
+    """Redirect the bare URL to the interactive API docs, purely cosmetic."""
+    return RedirectResponse(url="/docs")
 
 @app.get("/health")
 def health() -> dict:
