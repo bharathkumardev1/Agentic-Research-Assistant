@@ -6,6 +6,8 @@ A small team of AI agents that reads research papers and answers questions about
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+[![CI](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/agentic-research-assistant/actions/workflows/ci.yml)
+
 ## Why I built it
 
 Reading a stack of papers to answer one focused question is slow. And if you just dump a pile of PDFs into a single LLM call, it tends to make things up and skip the parts that actually matter. I wanted something that behaves more like a careful researcher: find the relevant bits, draft an answer, criticize that draft, and dig up more evidence when the answer is weak.
