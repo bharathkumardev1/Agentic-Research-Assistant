@@ -1,0 +1,14 @@
+# Runtime dependencies for the Agentic Research Assistant.
+# For development extras (pytest, ruff) install with: pip install -e ".[dev]"
+
+anthropic>=0.40
+langgraph>=0.2
+faiss-cpu>=1.7.4
+sentence-transformers>=2.6
+pypdf>=4.0
+arxiv>=2.1
+pydantic>=2.5
+pydantic-settings>=2.1
+numpy>=1.24
+tenacity>=8.2
+rich>=13.0
