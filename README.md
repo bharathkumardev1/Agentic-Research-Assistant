@@ -1,259 +1,135 @@
 # Agentic Research Assistant
 
-A small team of AI agents that reads research papers and answers questions about them, with citations. It uses Claude for the reasoning, LangGraph to coordinate the agents, and FAISS for retrieval. Given a question, it pulls the relevant passages, writes a grounded summary, checks its own work, and goes back for more evidence if the answer is thin. The final output pulls out the methods, the key findings, and the open research gaps, with every claim tied back to a source.
+Reads a set of research papers and answers questions about them, with citations. Instead of stuffing everything into one prompt, it runs three small agents in a loop: one retrieves relevant passages, one writes a grounded answer, and one checks that answer and decides whether to go back for more evidence. Built on Claude, LangGraph, and FAISS.
 
 [![CI](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+**Live demo:** https://agentic-research-assistant-xzno.onrender.com/docs
+
+That link opens an interactive API page. Hit "Try it out" on `/research`, type a question, and run it in the browser. No setup. (It's on a free host that sleeps when idle, so the first request after a while takes 30 to 60 seconds to wake up. After that it's quick.)
 
 ## Why I built it
 
-Reading a stack of papers to answer one focused question is slow. And if you just dump a pile of PDFs into a single LLM call, it tends to make things up and skip the parts that actually matter. I wanted something that behaves more like a careful researcher: find the relevant bits, draft an answer, criticize that draft, and dig up more evidence when the answer is weak.
+Dumping a folder of PDFs into a single LLM call doesn't work well. It hallucinates, it misses the parts you actually care about, and you can't tell which claim came from which paper. I wanted something that behaves more like a person doing a literature review: find the relevant bits, draft an answer, then look at that draft critically and go dig up more if it's thin.
 
-So instead of one big prompt, the work is split across three agents that share a single vector store:
+So the work is split across three agents that share one vector store:
 
-* The **retriever** fetches the most relevant chunks for the current query.
-* The **summarizer** asks Claude for a structured answer where every factual sentence carries a `[n]` marker pointing at a specific passage.
-* The **evaluator** is a second Claude call that judges whether the answer is grounded and complete. If it isn't, it writes a better search query and the whole thing loops back to retrieval.
+- The **retriever** pulls the most relevant chunks for the current query.
+- The **summarizer** asks Claude for an answer that uses only those chunks, and tags every factual sentence with a `[n]` pointing at its source.
+- The **evaluator** is a second Claude call that grades the answer for grounding and coverage. If it's not good enough, it writes a sharper query and the whole thing loops.
 
-A LangGraph state machine wires those steps into a retrieve, summarize, evaluate loop and decides when the answer is good enough to stop.
+A LangGraph state machine runs that loop and decides when to stop.
 
-## It runs out of the box, no API key needed
+## How the loop works
 
-Every piece has a lightweight fallback, so you can watch the full loop run with no API key and no model download:
+The interesting part is the dashed arrow. The evaluator's verdict, not a fixed script, is what decides whether the system is done or goes around again.
+
+```mermaid
+flowchart LR
+    Q([Question]) --> R[Retriever]
+    R -->|top-k chunks| S[Summarizer]
+    S -->|cited answer| E[Evaluator]
+    E -->|good enough| C[Compose report]
+    E -.->|needs more| R
+    C --> OUT([Report])
+    R <--> VS[(FAISS index)]
+```
+
+The loop is capped by `MAX_ITERATIONS` (3 by default), so it always terminates. That cap plus a per-run limit on API calls is also what keeps a misbehaving evaluator from looping forever and running up a bill.
+
+Step by step:
+
+1. Documents get split by a chunker that breaks on paragraph, then sentence, then word boundaries, with a bit of overlap so context isn't cut mid-thought. Each chunk is embedded and added to FAISS.
+2. For the current query, the retriever returns the top matches by cosine similarity. Across loops, new chunks are merged with what's already been found.
+3. The chunks get numbered and handed to Claude, which answers using only them and marks each claim with `[n]`. The JSON that comes back is validated with Pydantic.
+4. A second Claude call scores the answer. If it needs more and there's budget left, it hands back a refined query and the graph loops.
+5. Once the evaluator is satisfied (or the budget runs out), everything is rendered into a Markdown report: the summary, the extracted methods, key findings, and research gaps, plus the search trail and a numbered reference list.
+
+## Runs offline, no API key
+
+Every piece has a fallback, so you can watch the full loop run with nothing configured:
 
 ```bash
 pip install -e .
 python -m research_assistant demo
 ```
 
-The demo runs offline by default. It swaps in a deterministic hashing embedding and a stub Claude client that fakes plausibly structured output from the retrieved text. That still exercises the real retrieval, the real graph, the real citation numbering, and the real report renderer, just without the network. When you want the real thing, drop your key into a `.env` file and add `--use-api`.
+The demo runs offline. It swaps in a deterministic hashing embedding and a stub that fakes structured output from the retrieved text. That still exercises the real retrieval, the real graph, the real citation numbering, and the real report renderer. It just doesn't call the network. Add an `ANTHROPIC_API_KEY` and you get real Claude answers instead of the stub.
 
-## How the loop works
+## Running it locally
 
-Here is the flow. The interesting part is the arrow that loops back: the evaluator's verdict decides whether the system is done or needs another round.
-
-```mermaid
-flowchart LR
-    Q([Research question]) --> R[Retriever]
-    R -->|top-k chunks| S[Summarizer]
-    S -->|cited summary| E[Evaluator]
-    E -->|sufficient| C[Compose report]
-    E -.->|needs more| R
-    C --> OUT([Markdown report])
-    R <--> VS[(FAISS index)]
-```
-
-In plain text:
-
-```
-            +----------------------- retrieve <-------------------+
-            |                           |                         |
-   START ---+                           v                         | needs more
-                                    summarize                     | + refined query
-                                        |                         | + budget left
-                                        v                         |
-                                    evaluate ---------------------+
-                                        |
-                                        | sufficient  /  budget spent
-                                        v
-                                    compose ----> END
-```
-
-That loop is bounded by `max_iterations` (three by default), so it always terminates. This is what makes it agentic rather than a fixed pipeline: the model's own critique controls where the program goes next.
-
-Step by step:
-
-1. **Ingest.** Documents get loaded and split by a chunker that tries to break on paragraph, then sentence, then word boundaries, keeping a bit of overlap so context isn't cut mid-thought. Each chunk is embedded and added to the FAISS index.
-2. **Retrieve.** The retriever returns the top matches for the current query by cosine similarity. Across loop iterations, new chunks get merged with earlier ones (deduped by id, best score kept).
-3. **Summarize.** The chunks are rendered into a numbered context block. Claude is told to answer using only those sources and to tag every factual sentence with a `[n]` marker. The JSON that comes back is validated into a typed object.
-4. **Evaluate.** A second Claude call scores grounding and coverage and decides "sufficient" or "needs more". If more is needed and there's budget left, it hands back a refined query and the graph loops.
-5. **Compose.** Once the evaluator is happy or the budget runs out, everything gets rendered into a Markdown report: the summary, the three extracted lists, the evaluation, the search trail, and a numbered reference list.
-
-## What's in the box
-
-* A three-agent LangGraph loop with a real reflect-and-retry cycle, not a straight chain.
-* Citation-backed answers. The inline `[n]` markers are generated against numbered sources and reconciled with the bibliography, so you can trace every claim back to a passage.
-* Structured extraction into summary, methods, key findings, and research gaps, validated with Pydantic at the boundary where the model output comes in.
-* FAISS retrieval using an inner-product index over normalized vectors (which gives you cosine similarity), with save and load to disk.
-* Pluggable embeddings. Good quality `sentence-transformers` by default, or a dependency-free hashing backend for offline runs.
-* A fully offline mode that runs the whole graph end to end with no key and no downloads.
-* Input from local PDFs, text, and Markdown, or straight from arXiv.
-* Some care around robustness: heavy imports are lazy, transient API errors are retried with backoff, and JSON is pulled out of model output defensively.
-
-## Project layout
-
-```
-agentic-research-assistant/
-├── src/research_assistant/
-│   ├── config.py              # Settings from env / .env
-│   ├── schemas.py             # Pydantic models shared everywhere
-│   ├── llm.py                 # Claude client with retries, plus the offline stub
-│   ├── context.py             # Numbers the sources and keeps citations aligned
-│   ├── report.py              # Renders the Markdown report
-│   ├── factory.py             # Wires all the pieces together
-│   ├── cli.py                 # The research-assistant command
-│   ├── ingestion/
-│   │   ├── loaders.py         # PDF / text / Markdown / arXiv loaders
-│   │   └── chunking.py        # Boundary-aware chunker (standard library only)
-│   ├── rag/
-│   │   ├── embeddings.py      # sentence-transformers and hashing backends
-│   │   └── vector_store.py    # FAISS store with persistence
-│   ├── agents/
-│   │   ├── retriever.py
-│   │   ├── summarizer.py
-│   │   └── evaluator.py
-│   └── graph/
-│       ├── state.py           # Typed LangGraph state
-│       └── workflow.py        # Graph topology and the pipeline facade
-├── tests/                     # Unit tests plus an offline end-to-end test
-├── examples/sample_papers/    # Three synthetic papers for the demo
-├── pyproject.toml
-├── requirements.txt
-├── Makefile
-└── .env.example
-```
-
-## Getting started
-
-You'll need Python 3.9 or newer.
+Needs Python 3.9 or newer.
 
 ```bash
-git clone https://github.com/bharathkumardev1/agentic-research-assistant.git
-cd agentic-research-assistant
-
-python -m venv .venv && source .venv/bin/activate   # optional, but nice
-pip install -e .                                     # add ".[dev]" for the test tools
+git clone https://github.com/bharathkumardev1/Agentic-Research-Assistant.git
+cd Agentic-Research-Assistant
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
 ```
 
-That installs a `research-assistant` command, which is the same as `python -m research_assistant`.
+Point it at your own papers and ask something:
 
-A quick note on FAISS: `faiss-cpu` has prebuilt wheels for most platforms, so `pip` usually just works. If it fails on yours, check the FAISS install guide.
+```bash
+# Local files or folders (.pdf, .txt, .md), or pull from arXiv
+research-assistant ingest path/to/papers/
+research-assistant ingest --arxiv "retrieval augmented generation" --arxiv-max 8
+
+research-assistant research "What methods do these papers use for grounding, and what gaps remain?"
+research-assistant research "Compare their evaluation setups" -o report.md   # save to a file
+research-assistant research "Compare their evaluation setups" --json          # full structured result
+```
+
+For real Claude answers, put your key in a `.env` file (copy `.env.example`) and it gets picked up automatically.
+
+## Running the API
+
+```bash
+uvicorn research_assistant.webapp:app --reload
+```
+
+Three endpoints:
+
+- `GET /health` returns status and whether it's running in live or offline mode. No auth, so a load balancer can poll it.
+- `POST /research` runs the loop for a question.
+- `GET /docs` is the interactive Swagger page.
+
+If you set `WEB_API_KEY`, `/research` requires that value in an `X-API-Key` header. Leave it unset and the endpoint is open (fine for a local demo, not for anything public).
+
+```bash
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" \
+  -d '{"question": "What are the research gaps?"}'
+```
 
 ## Configuration
 
-Settings come from environment variables or a `.env` file. Copy the template and fill in your key:
-
-```bash
-cp .env.example .env
-# open .env and set ANTHROPIC_API_KEY
-```
-
-The main knobs, with their defaults:
+Everything reads from environment variables or a `.env` file. The ones you'll actually touch:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | (none) | Needed for live runs, not for the offline demo. |
-| `SUMMARIZER_MODEL` | `claude-sonnet-4-6` | Model used for the synthesis. |
-| `EVALUATOR_MODEL` | `claude-opus-4-8` | Model used for the critique. |
-| `EMBEDDING_BACKEND` | `sentence-transformers` | Either `sentence-transformers` or `hashing`. |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | The sentence-transformers model name. |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1100` / `150` | Chunk size and overlap, in characters. |
-| `TOP_K` | `6` | How many chunks to retrieve per query. |
-| `MAX_ITERATIONS` | `3` | Cap on the retrieve, summarize, evaluate cycles. |
-| `INDEX_DIR` | `data/index` | Where the FAISS index lives. |
+| `ANTHROPIC_API_KEY` | (none) | Needed for real answers. Not needed for the offline demo. |
+| `WEB_API_KEY` | (none) | If set, `/research` requires it in the `X-API-Key` header. |
+| `SUMMARIZER_MODEL` | `claude-sonnet-4-6` | Model for the answer. |
+| `EVALUATOR_MODEL` | `claude-opus-4-8` | Model for the critique. |
+| `MAX_API_CALLS` | `40` | Hard ceiling on Claude calls per run. A cost guard. |
+| `MAX_ITERATIONS` | `3` | Cap on retrieve/summarize/evaluate cycles. |
+| `EMBEDDING_BACKEND` | `sentence-transformers` | Or `hashing` for a dependency-free offline embedder. |
+| `TOP_K` | `6` | Chunks retrieved per query. |
+| `LOG_LEVEL` | `INFO` | `DEBUG` for the play-by-play. |
 
-You only need a key to actually call Claude. The default embedding backend downloads a small model the first time you use it; set `EMBEDDING_BACKEND=hashing` if you'd rather avoid that too.
+## Deploying it
 
-## Using it
-
-The quickest way to see it work, no key required:
+There's a `Dockerfile` and a `render.yaml`. To run it in a container:
 
 ```bash
-python -m research_assistant demo
+docker build -t research-assistant .
+docker run --rm -p 8000:8000 research-assistant
 ```
 
-This ingests the three bundled sample papers and runs a sample question through the full loop with the stub model, printing each step as it goes.
-
-To point it at your own papers:
-
-```bash
-# Local files or folders (.pdf, .txt, .md)
-research-assistant ingest path/to/papers/ another_paper.pdf
-
-# Or pull from arXiv
-research-assistant ingest --arxiv "retrieval augmented generation" --arxiv-max 8
-```
-
-That builds the index and saves it to `INDEX_DIR`. Then ask a question:
-
-```bash
-research-assistant research "What methods do these papers use for grounding, and what gaps remain?"
-
-# Save the report to a file, or print the whole result as JSON
-research-assistant research "Compare the evaluation protocols" -o report.md
-research-assistant research "Compare the evaluation protocols" --json
-```
-
-Handy flags: `--top-k`, `--max-iterations`, `--index-dir`, and `--dry-run` (run the loop offline against an index built with the hashing backend).
-
-For a real run against Claude:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-research-assistant demo --use-api
-```
-
-## What a run looks like
-
-When you run the demo you'll see the loop narrate itself. Here's the important part of a real run, which shows the evaluator sending it back for a second pass:
-
-```
-Running agentic research loop
-  -> retrieve   query='How do retrieval and multi-agent loops improve reliability...'
-     found 6 new chunk(s); 6 in context
-  -> summarize  over 6 chunk(s)
-  -> evaluate   iter=1 verdict=needs_more coverage=0.55
-  -> retrieve   query='quantitative results and limitations'
-     found 6 new chunk(s); 7 in context
-  -> summarize  over 7 chunk(s)
-  -> evaluate   iter=2 verdict=sufficient coverage=0.85
-  composing report
-```
-
-And the report it writes has this shape (this is the real structure; only the prose differs between the offline stub and a live Claude run):
-
-```markdown
-# Research synthesis
-
-**Question:** How do retrieval-augmented and multi-agent approaches improve reliability, and what gaps remain?
-
-## Summary
-Retrieval grounds answers in retrieved passages, which cuts down unsupported claims [1].
-Adding a reflective evaluator on top lets the system ask for more evidence when coverage
-is low, and revisions accumulate context rather than starting over [2][3].
-
-## Methods
-- FAISS index over chunked documents with top-k cosine retrieval [1]
-- An evaluator agent that scores coverage and triggers another retrieval round [2]
-
-## Key findings
-- Grounding cut unsupported claims substantially on the reported benchmark [1]
-- Iterative refinement improved answer completeness [2]
-
-## Research gaps
-- How well it generalizes beyond the studied datasets is unverified
-- The added latency and token cost of the loop aren't fully characterized [3]
-
-## Evaluation
-- Sufficiency: sufficient
-- Coverage score: 0.85
-- Grounded: yes
-
-## References
-1. Dense Retrieval with Contrastive Pretraining for Literature Search
-2. Retrieval-Augmented Generation for Scientific Question Answering
-3. Multi-Agent Reflection Improves Long-Form Reasoning
-```
-
-One honest note: the summaries above are written the way real Claude phrases things. In offline mode the stub isn't a language model, so it stitches sentences together more crudely. The point of the offline mode is to prove the plumbing works, not to produce polished prose. Add a key for that.
-
-## Making it your own
-
-Everything is wired together in `factory.py`, so swapping a part stays local.
-
-To use a different embedding model, set `EMBEDDING_MODEL`, or write your own backend in `rag/embeddings.py` (just give it a `name`, a `dim`, and an `embed()` that returns unit vectors) and register it in the factory. To change the models, set `SUMMARIZER_MODEL` and `EVALUATOR_MODEL`; a cheaper model for the evaluator and a stronger one for the summary is a reasonable split. To add an agent or change the loop, edit the graph in `graph/workflow.py`, which is a handful of nodes and one routing function. To swap FAISS for something else, match the same add, search, save, load surface. And the main dials for behavior are `MAX_ITERATIONS`, `TOP_K`, `CHUNK_SIZE`, and `CHUNK_OVERLAP`.
+The live demo above is this image on Render's free tier, deployed straight from the `render.yaml` blueprint. Connect the repo on Render and it picks up the config on its own. Set `ANTHROPIC_API_KEY` and `WEB_API_KEY` in the dashboard (they're marked as secrets, so they never live in the repo).
 
 ## Tests
 
@@ -262,19 +138,31 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The suite covers the chunker, the schema validation, the citation alignment, the hashing embeddings, the JSON extraction and stub client, the FAISS store, and a full offline end-to-end run of the agent graph. The tests that need `faiss-cpu` or `langgraph` skip themselves if those aren't installed, so a minimal setup still passes; CI installs the full set and runs everything on Python 3.9, 3.11, and 3.12.
+49 tests covering the chunker, schema validation, citation alignment, the hashing embedder, the FAISS store, JSON extraction and the stub client, a full offline end-to-end run through the real graph, and the web endpoints (health, auth, and a real pipeline call). Tests that need `faiss-cpu` or `langgraph` skip themselves if those aren't installed, so a minimal setup still passes. CI runs the whole thing on Python 3.9, 3.11, and 3.12.
 
-## Ideas for later
+## What this is, and what it isn't
 
-* Verify each citation individually by re-checking the `[n]` against its source span
-* Re-rank retrieved chunks with a cross-encoder
-* Hybrid retrieval (BM25 plus dense)
-* Cache embeddings and model responses
-* A thin web UI over the pipeline
+I want to be straight about scope, because "agentic AI" gets oversold constantly.
 
-## A note on the samples
+The sample papers under `examples/sample_papers/` are synthetic. I wrote them so the demo has something to run against offline. The numbers in any sample output come from those made-up papers, not real research. The architecture, the retrieval, the citation grounding, and the agent loop are all real and run against live Claude the moment you add a key and point it at actual PDFs or an arXiv query.
 
-The three papers under `examples/sample_papers/` are synthetic; I wrote them so the demo has something to chew on offline. The numbers in the sample output come from those made-up papers, not from real research. The architecture, the grounding, and the agent loop are all real, though, and they run against live Claude the moment you add a key and point `ingest` at actual PDFs or an arXiv query.
+It's also not a production system, and I wouldn't call it one. It's a working, deployed demo. There's no database (the FAISS index is a file), no per-user accounts, no rate limiting beyond the cost cap, no metrics or alerting, and the free host sleeps when idle. Turning this into something people depend on would mean adding most of that. What's here is the core engine, tested, containerized, logged, and reachable at a URL.
+
+## Project layout
+
+```
+src/research_assistant/
+  config.py         settings from env / .env
+  schemas.py        Pydantic models used everywhere
+  llm.py            Claude client (with retries + cost cap) and the offline stub
+  webapp.py         FastAPI service
+  cli.py            the research-assistant command
+  logging_utils.py  structured logging with a per-run id
+  ingestion/        loaders (pdf/text/md/arxiv) and the chunker
+  rag/              embeddings and the FAISS store
+  agents/           retriever, summarizer, evaluator
+  graph/            the LangGraph loop
+```
 
 ## License
 
