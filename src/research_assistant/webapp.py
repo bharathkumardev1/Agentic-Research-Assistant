@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -66,6 +67,15 @@ app = FastAPI(
     description="Multi-agent RAG over research papers, with citation-backed answers.",
     version="0.2.0",
     lifespan=_lifespan,
+)
+
+_cors_origins = get_settings().cors_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins.strip() == "*" else [o.strip() for o in _cors_origins.split(",") if o.strip()],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
