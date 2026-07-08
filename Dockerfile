@@ -10,6 +10,15 @@
 # answers questions immediately after `docker run`, no volumes or env vars
 # required. Set ANTHROPIC_API_KEY (via --env-file .env) for real Claude
 # answers; the service still starts fine without it, in dry-run mode.
+#
+# For a real corpus: mount a volume at INDEX_DIR, run
+# `research-assistant ingest ...` against it once, and the web service will
+# load that persisted index on startup instead of the bundled demo papers.
+#
+# Scaling: set WEB_CONCURRENCY to run multiple uvicorn workers (each loads
+# its own copy of the index into memory). Rate limiting and per-run state
+# are in-memory and per-process, so they don't coordinate across workers or
+# replicas -- see research_assistant/rate_limit.py.
 
 FROM python:3.11-slim AS base
 
@@ -36,8 +45,9 @@ USER appuser
 ENV PYTHONUNBUFFERED=1 \
     LOG_LEVEL=INFO \
     INDEX_DIR=/app/data/index \
-    PORT=8000
+    PORT=8000 \
+    WEB_CONCURRENCY=1
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn research_assistant.webapp:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn research_assistant.webapp:app --host 0.0.0.0 --port ${PORT} --workers ${WEB_CONCURRENCY}"]

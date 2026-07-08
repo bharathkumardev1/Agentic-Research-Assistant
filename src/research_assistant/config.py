@@ -39,10 +39,31 @@ class Settings(BaseSettings):
         alias="WEB_API_KEY",
         description="If set, the web service requires this key in the X-API-Key header.",
     )
+    web_api_keys: str = Field(
+        default="",
+        alias="WEB_API_KEYS",
+        description=(
+            "Comma-separated 'name:key' pairs for scoped API access, e.g. "
+            "'alice:sk-alice,bob:sk-bob'. Adds to (does not replace) WEB_API_KEY. "
+            "Each name is used to bucket rate limits and tag logs per caller."
+        ),
+    )
     cors_origins: str = Field(
         default="*",
         alias="CORS_ORIGINS",
         description="Comma-separated list of allowed browser origins for the web service, or '*' for any.",
+    )
+    rate_limit_per_minute: int = Field(
+        default=20,
+        ge=0,
+        alias="RATE_LIMIT_PER_MINUTE",
+        description="Max /research requests per minute per client (by API key or IP). 0 disables the limit.",
+    )
+    request_timeout_seconds: float = Field(
+        default=120.0,
+        ge=1.0,
+        alias="REQUEST_TIMEOUT_SECONDS",
+        description="Hard wall-clock cap on a single /research call; the caller gets a 504 if it's exceeded.",
     )
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
 
