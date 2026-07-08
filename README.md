@@ -109,6 +109,7 @@ agentic-research-assistant/
 │       └── workflow.py        # Graph topology and the pipeline facade
 ├── tests/                     # Unit tests plus an offline end-to-end test
 ├── examples/sample_papers/    # Three synthetic papers for the demo
+├── frontend/                  # Vite + React demo UI (see "Frontend" below)
 ├── pyproject.toml
 ├── requirements.txt
 ├── Makefile
@@ -248,6 +249,18 @@ is low, and revisions accumulate context rather than starting over [2][3].
 ```
 
 One honest note: the summaries above are written the way real Claude phrases things. In offline mode the stub isn't a language model, so it stitches sentences together more crudely. The point of the offline mode is to prove the plumbing works, not to produce polished prose. Add a key for that.
+
+## Frontend
+
+`frontend/` is a small Vite + React app that gives the pipeline a UI: a question box, a three-stage agent rail (retrieve → draft → check), and the answer rendered with clickable `[n]` citation chips next to their source passages.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+By default it runs entirely on baked-in demo data, no backend required. To point it at a real deployment, copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_URL` (plus `VITE_API_KEY` if the backend has `WEB_API_KEY` set). The header pill and footer switch to "live api" once that's configured. The backend needs `CORS_ORIGINS` set to allow the frontend's origin (defaults to `*`, fine for a demo).
 
 ## Making it your own
 

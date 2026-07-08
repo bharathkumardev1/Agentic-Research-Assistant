@@ -4,7 +4,7 @@
 .DEFAULT_GOAL := help
 PY ?= python
 
-.PHONY: help install install-dev demo ingest research test lint format clean
+.PHONY: help install install-dev demo ingest research test lint format clean frontend-install frontend-dev frontend-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -39,3 +39,12 @@ clean: ## Remove caches and build artifacts
 	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .ruff_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf data/index data/index_demo
+
+frontend-install: ## Install frontend dependencies
+	cd frontend && npm install
+
+frontend-dev: ## Run the frontend dev server
+	cd frontend && npm run dev
+
+frontend-build: ## Build the frontend for production
+	cd frontend && npm run build
