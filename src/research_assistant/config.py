@@ -39,6 +39,11 @@ class Settings(BaseSettings):
         alias="WEB_API_KEY",
         description="If set, the web service requires this key in the X-API-Key header.",
     )
+    cors_origins: str = Field(
+        default="*",
+        alias="CORS_ORIGINS",
+        description="Comma-separated list of allowed browser origins for the web service, or '*' for any.",
+    )
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
 
     # --- Embeddings / RAG --------------------------------------------------
