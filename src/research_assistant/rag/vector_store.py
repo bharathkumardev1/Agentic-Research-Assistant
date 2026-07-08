@@ -91,6 +91,17 @@ class FaissVectorStore:
         (directory / _META_FILE).write_text(json.dumps(meta, indent=2), "utf-8")
 
     @classmethod
+    def exists(cls, directory: Path) -> bool:
+        """Return True if a store previously written by :meth:`save` is at ``directory``.
+
+        Cheap file-existence check, so callers can decide whether it's worth
+        constructing an (possibly expensive to load) embedding backend before
+        calling :meth:`load`.
+        """
+        directory = Path(directory)
+        return (directory / _INDEX_FILE).exists() and (directory / _CHUNKS_FILE).exists()
+
+    @classmethod
     def load(cls, directory: Path, embeddings: EmbeddingBackend) -> FaissVectorStore:
         """Load a store previously written by :meth:`save`."""
         directory = Path(directory)

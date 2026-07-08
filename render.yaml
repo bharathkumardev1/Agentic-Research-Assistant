@@ -8,6 +8,11 @@
 # To answer with real Claude instead of the offline stub, set ANTHROPIC_API_KEY
 # in the Render dashboard under this service's Environment tab, it's marked
 # sync: false below so it's never stored in this file or in git.
+#
+# The free plan is single-CPU, so WEB_CONCURRENCY stays at 1 here. On a plan
+# with more CPU, raise it to run multiple uvicorn workers -- note that rate
+# limiting is in-memory per worker, so the effective limit multiplies by
+# WEB_CONCURRENCY (see research_assistant/rate_limit.py).
 
 services:
   - type: web
@@ -19,6 +24,8 @@ services:
     envVars:
       - key: LOG_LEVEL
         value: INFO
+      - key: WEB_CONCURRENCY
+        value: "1"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: WEB_API_KEY

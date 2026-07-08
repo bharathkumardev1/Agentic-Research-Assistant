@@ -89,13 +89,14 @@ For real Claude answers, put your key in a `.env` file (copy `.env.example`) and
 uvicorn research_assistant.webapp:app --reload
 ```
 
-Three endpoints:
+Endpoints:
 
 - `GET /health` returns status and whether it's running in live or offline mode. No auth, so a load balancer can poll it.
+- `GET /metrics` exposes Prometheus metrics (request count by outcome, latency histogram). No auth.
 - `POST /research` runs the loop for a question.
 - `GET /docs` is the interactive Swagger page.
 
-If you set `WEB_API_KEY`, `/research` requires that value in an `X-API-Key` header. Leave it unset and the endpoint is open (fine for a local demo, not for anything public).
+If you set `WEB_API_KEY` (a single shared key) and/or `WEB_API_KEYS` (comma-separated `name:key` pairs for multiple named callers), `/research` requires that value in an `X-API-Key` header. Leave both unset and the endpoint is open (fine for a local demo, not for anything public).
 
 ```bash
 curl -X POST http://localhost:8000/research \
@@ -103,6 +104,13 @@ curl -X POST http://localhost:8000/research \
   -H "X-API-Key: your-key" \
   -d '{"question": "What are the research gaps?"}'
 ```
+
+Two more things guard the endpoint against misuse:
+
+- **Rate limiting.** `RATE_LIMIT_PER_MINUTE` (default 20) caps requests per caller, bucketed by API key name or IP. It's in-memory and per-process, so it doesn't coordinate across multiple workers or replicas — see `src/research_assistant/rate_limit.py` for why, and what a real multi-instance limit would need (a shared store like Redis).
+- **Timeouts.** `REQUEST_TIMEOUT_SECONDS` (default 120) bounds how long a single request can hold the connection open; the caller gets a `504` instead of hanging indefinitely.
+
+Errors never leak internals: a failed run returns a generic message with a short reference id, and the full exception is logged server-side against that same id for debugging.
 
 ## Configuration
 
@@ -112,12 +120,17 @@ Everything reads from environment variables or a `.env` file. The ones you'll ac
 |---|---|---|
 | `ANTHROPIC_API_KEY` | (none) | Needed for real answers. Not needed for the offline demo. |
 | `WEB_API_KEY` | (none) | If set, `/research` requires it in the `X-API-Key` header. |
+| `WEB_API_KEYS` | (none) | Comma-separated `name:key` pairs for multiple named callers, e.g. `alice:sk-a,bob:sk-b`. |
+| `RATE_LIMIT_PER_MINUTE` | `20` | Max `/research` calls per minute per caller. `0` disables it. |
+| `REQUEST_TIMEOUT_SECONDS` | `120` | Hard cap on a single `/research` call before it returns `504`. |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed browser origins for the web service, or `*` for any. |
 | `SUMMARIZER_MODEL` | `claude-sonnet-4-6` | Model for the answer. |
 | `EVALUATOR_MODEL` | `claude-opus-4-8` | Model for the critique. |
 | `MAX_API_CALLS` | `40` | Hard ceiling on Claude calls per run. A cost guard. |
 | `MAX_ITERATIONS` | `3` | Cap on retrieve/summarize/evaluate cycles. |
 | `EMBEDDING_BACKEND` | `sentence-transformers` | Or `hashing` for a dependency-free offline embedder. |
 | `TOP_K` | `6` | Chunks retrieved per query. |
+| `INDEX_DIR` | `data/index` | Where a real ingested index is saved/loaded from. Point it at a persistent volume for a corpus that survives redeploys. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` for the play-by-play. |
 
 ## Deploying it
@@ -130,6 +143,12 @@ docker run --rm -p 8000:8000 research-assistant
 ```
 
 The live demo above is this image on Render's free tier, deployed straight from the `render.yaml` blueprint. Connect the repo on Render and it picks up the config on its own. Set `ANTHROPIC_API_KEY` and `WEB_API_KEY` in the dashboard (they're marked as secrets, so they never live in the repo).
+
+For a real corpus, mount a persistent volume at `INDEX_DIR`, run `research-assistant ingest ...` against it once, and the web service loads that index on startup instead of the bundled demo papers on every restart.
+
+To run more than one worker (each holds its own copy of the index in memory), set `WEB_CONCURRENCY`. Render's free plan is single-CPU so it defaults to `1`; on a bigger plan, raise it. One caveat: rate limiting is in-memory per worker, so the effective `/research` limit multiplies by `WEB_CONCURRENCY` — fine for a single box, not a substitute for a shared limiter if you're running multiple replicas.
+
+A scheduled GitHub Actions workflow (`.github/workflows/keepalive.yml`) pings `/health` every 10 minutes to stop the free-tier instance from idling to sleep. It's a mitigation, not a fix — the free plan still caps monthly instance hours and has no uptime SLA; a paid plan removes that constraint outright.
 
 ## Frontend
 
@@ -150,7 +169,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-51 tests covering the chunker, schema validation, citation alignment, the hashing embedder, the FAISS store, JSON extraction and the stub client, a full offline end-to-end run through the real graph, and the web endpoints (health, auth, and a real pipeline call). Tests that need `faiss-cpu` or `langgraph` skip themselves if those aren't installed, so a minimal setup still passes. CI runs the whole thing on Python 3.9, 3.11, and 3.12.
+58 tests covering the chunker, schema validation, citation alignment, the hashing embedder, the FAISS store, JSON extraction and the stub client, a full offline end-to-end run through the real graph, and the web endpoints (health, auth, rate limiting, timeouts, error handling, metrics, and a real pipeline call). Tests that need `faiss-cpu` or `langgraph` skip themselves if those aren't installed, so a minimal setup still passes. CI runs the whole thing on Python 3.9, 3.11, and 3.12.
 
 ## What this is, and what it isn't
 
@@ -158,7 +177,9 @@ I want to be straight about scope, because "agentic AI" gets oversold constantly
 
 The sample papers under `examples/sample_papers/` are synthetic. I wrote them so the demo has something to run against offline. The numbers in any sample output come from those made-up papers, not real research. The architecture, the retrieval, the citation grounding, and the agent loop are all real and run against live Claude the moment you add a key and point it at actual PDFs or an arXiv query.
 
-It's also not a production system, and I wouldn't call it one. It's a working, deployed demo. There's no database (the FAISS index is a file), no per-user accounts, no rate limiting beyond the cost cap, no metrics or alerting, and the free host sleeps when idle. Turning this into something people depend on would mean adding most of that. What's here is the core engine, tested, containerized, logged, and reachable at a URL.
+The web service has the hardening a public endpoint needs: per-caller rate limiting, enforced request timeouts, sanitized error responses (no internal exception text reaches the client), scoped API keys, Prometheus metrics at `/metrics`, pinned dependency versions for reproducible builds, and a persisted index that survives redeploys when you mount a volume.
+
+What it still isn't is a multi-tenant production system, and I wouldn't call it one. There's no database (the FAISS index is a file), no per-user accounts or usage billing, no distributed rate limiting or shared cache across replicas (both are in-memory per process — see `rate_limit.py`), and no request tracing beyond structured logs. The free host it's deployed on has no uptime SLA. Turning this into something people depend on at scale would mean adding most of that. What's here is a solid single-instance service: tested, containerized, logged, metriced, and reachable at a URL.
 
 ## Project layout
 
@@ -168,6 +189,7 @@ src/research_assistant/
   schemas.py        Pydantic models used everywhere
   llm.py            Claude client (with retries + cost cap) and the offline stub
   webapp.py         FastAPI service
+  rate_limit.py     in-process per-caller rate limiter
   cli.py            the research-assistant command
   logging_utils.py  structured logging with a per-run id
   ingestion/        loaders (pdf/text/md/arxiv) and the chunker
