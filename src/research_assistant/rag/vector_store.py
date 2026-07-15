@@ -21,7 +21,7 @@ _META_FILE = "meta.json"
 
 def _import_faiss():
     try:
-        import faiss  # type: ignore
+        import faiss
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError(
             "The vector store requires 'faiss-cpu'. "

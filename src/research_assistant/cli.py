@@ -16,9 +16,12 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .logging_utils import configure_logging
+
+if TYPE_CHECKING:
+    from rich.console import Console as _RichConsole
 
 configure_logging()
 
@@ -34,12 +37,13 @@ _SAMPLE_QUESTION = (
 # --------------------------------------------------------------------------- #
 class _Console:
     def __init__(self) -> None:
+        self._rich: Optional[_RichConsole] = None
         try:
             from rich.console import Console
 
             self._rich = Console()
         except ImportError:  # pragma: no cover
-            self._rich = None
+            pass
 
     def print(self, *args, **kwargs) -> None:
         if self._rich:
@@ -89,7 +93,7 @@ def _event_printer():
 def _settings(index_dir: Optional[str], top_k: Optional[int], max_iterations: Optional[int]):
     from .config import get_settings
 
-    update = {}
+    update: Dict[str, Any] = {}
     if index_dir:
         update["index_dir"] = Path(index_dir)
     if top_k:
@@ -158,9 +162,9 @@ def _run_research(question: str, settings, dry_run: bool, output: Optional[str],
 
     if not dry_run and hasattr(client, "call_count"):
         console.print(
-            f"\n[dim]API calls: {client.call_count} \u00b7 "
-            f"input tokens: {client.input_tokens} \u00b7 "
-            f"output tokens: {client.output_tokens}[/]"
+            f"\n[dim]API calls: {getattr(client, 'call_count', 0)} \u00b7 "
+            f"input tokens: {getattr(client, 'input_tokens', 0)} \u00b7 "
+            f"output tokens: {getattr(client, 'output_tokens', 0)}[/]"
         )
     return result
 
@@ -218,14 +222,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    common_dry = dict(action="store_true", help="Use offline hashing embeddings + stub model.")
+    def _add_dry_run(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Use offline hashing embeddings + stub model.",
+        )
 
     p_ingest = sub.add_parser("ingest", help="Build/refresh the vector index.")
     p_ingest.add_argument("paths", nargs="*", help="Files or directories (.pdf/.txt/.md).")
     p_ingest.add_argument("--arxiv", help="arXiv search query to fetch and index.")
     p_ingest.add_argument("--arxiv-max", type=int, default=5, help="Max arXiv results.")
     p_ingest.add_argument("--index-dir", help="Where to store the index.")
-    p_ingest.add_argument("--dry-run", **common_dry)
+    _add_dry_run(p_ingest)
     p_ingest.set_defaults(func=_cmd_ingest)
 
     p_research = sub.add_parser("research", help="Run the agentic loop on a question.")
@@ -235,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_research.add_argument("--max-iterations", type=int, help="Max reflection cycles.")
     p_research.add_argument("--output", "-o", help="Write the Markdown report to this file.")
     p_research.add_argument("--json", action="store_true", help="Print the full result as JSON.")
-    p_research.add_argument("--dry-run", **common_dry)
+    _add_dry_run(p_research)
     p_research.set_defaults(func=_cmd_research)
 
     p_demo = sub.add_parser("demo", help="Ingest bundled samples and run a sample question.")

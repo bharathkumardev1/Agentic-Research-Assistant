@@ -37,10 +37,24 @@ class LLMError(RuntimeError):
 class LLMClient(Protocol):
     """Minimal interface the agents depend on."""
 
-    def complete(self, *, model: str, system: str, prompt: str, **kw: Any) -> str: ...
+    def complete(
+        self,
+        *,
+        model: str,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        temperature: float = ...,
+    ) -> str: ...
 
     def complete_json(
-        self, *, model: str, system: str, prompt: str, **kw: Any
+        self,
+        *,
+        model: str,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        temperature: float = ...,
     ) -> Dict[str, Any]: ...
 
 
@@ -135,7 +149,9 @@ class ClaudeClient:
             self.input_tokens += getattr(usage, "input_tokens", 0) or 0
             self.output_tokens += getattr(usage, "output_tokens", 0) or 0
         return "".join(
-            block.text for block in message.content if getattr(block, "type", "") == "text"
+            getattr(block, "text", "")
+            for block in message.content
+            if getattr(block, "type", "") == "text"
         ).strip()
 
     def complete_json(
