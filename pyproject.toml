@@ -50,6 +50,7 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.4",
+    "mypy>=1.10",
 ]
 
 [project.urls]
@@ -80,3 +81,12 @@ select = ["E", "F", "I", "W", "UP", "B"]
 # Keep typing.Optional/List forms: with Python 3.9 support, Pydantic evaluates
 # annotations at runtime and `X | None` / builtin generics are not safe there.
 ignore = ["E501", "UP006", "UP007", "UP035", "UP045"]
+
+[tool.mypy]
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = "arxiv"
+ignore_missing_imports = true
