@@ -90,3 +90,8 @@ warn_redundant_casts = true
 [[tool.mypy.overrides]]
 module = "arxiv"
 ignore_missing_imports = true
+
+# faiss-cpu builds for Python 3.9 ship without type information; newer ones include it.
+[[tool.mypy.overrides]]
+module = "research_assistant.rag.vector_store"
+disable_error_code = ["import-untyped"]
