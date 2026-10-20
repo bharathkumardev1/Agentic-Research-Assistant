@@ -2,9 +2,9 @@
 
 Two interchangeable implementations are provided behind a common protocol:
 
-* :class:`SentenceTransformerEmbeddings` — high-quality dense embeddings via
+* :class:`SentenceTransformerEmbeddings`: dense embeddings via
   ``sentence-transformers`` (the production default).
-* :class:`HashingEmbeddings` — a deterministic, dependency-free bag-of-words
+* :class:`HashingEmbeddings`: a deterministic, dependency-free bag-of-words
   hashing embedding used for offline tests and ``--dry-run`` demos, so the
   whole pipeline can run without downloading a model.
 

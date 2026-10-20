@@ -2,9 +2,9 @@
 
 Subcommands
 -----------
-* ``ingest``   — build/refresh the FAISS index from files or arXiv.
-* ``research`` — run the multi-agent loop against an existing index.
-* ``demo``     — ingest the bundled sample papers and run a sample question
+* ``ingest``: build or refresh the FAISS index from files or arXiv.
+* ``research``: run the multi-agent loop against an existing index.
+* ``demo``: ingest the bundled sample papers and run a sample question
                  (offline by default via ``--dry-run``).
 
 Heavy imports are deferred into each handler so ``--help`` stays instant and

@@ -2,7 +2,7 @@
 
 Judges whether the current synthesis is well-grounded and adequately answers
 the question. When it is not, the evaluator proposes a refined search query,
-which the graph uses to loop back into retrieval — the core of the agentic
+which the graph uses to loop back into retrieval. That is the core of the agentic
 self-correction behaviour.
 """
 
@@ -17,8 +17,8 @@ from ..schemas import Evaluation, PaperSummary, RetrievedChunk, SourceRef
 
 SYSTEM = (
     "You are a critical peer reviewer evaluating a research synthesis. You check "
-    "two things: (1) grounding — is every claim supported by the cited sources, "
-    "with no fabrication; and (2) coverage — does the synthesis actually answer "
+    "two things: (1) grounding: is every claim supported by the cited sources, "
+    "with no fabrication; and (2) coverage: does the synthesis actually answer "
     "the question. You are concise, fair and decisive."
 )
 

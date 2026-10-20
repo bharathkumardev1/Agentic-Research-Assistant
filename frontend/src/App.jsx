@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 /* =============================================================
-   Agentic Research Assistant — frontend
+   Agentic Research Assistant: frontend
    Single file. Falls back to realistic canned demo data when no
    backend is configured, so it always runs standalone.
    Palette: night reading desk (ink + paper + ochre).

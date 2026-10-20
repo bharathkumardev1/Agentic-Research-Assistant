@@ -26,7 +26,7 @@ def render_report(
     references = (
         "\n".join(
             f"{s.marker}. **{s.title}**"
-            + (f" — `{s.source}`" if s.source else "")
+            + (f" (`{s.source}`)" if s.source else "")
             + f"\n   > {s.preview}"
             for s in sources
         )
@@ -40,7 +40,7 @@ def render_report(
             f"- **Sufficiency:** {evaluation.sufficiency}\n"
             f"- **Coverage score:** {evaluation.coverage_score:.2f}\n"
             f"- **Grounded:** {'yes' if evaluation.grounded else 'no'}\n"
-            f"- **Reviewer note:** {evaluation.critique or '—'}\n"
+            f"- **Reviewer note:** {evaluation.critique or 'none'}\n"
         )
         if evaluation.missing_aspects:
             eval_block += "- **Still missing:** " + ", ".join(evaluation.missing_aspects) + "\n"

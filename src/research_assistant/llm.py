@@ -1,9 +1,9 @@
 """A thin wrapper around the Anthropic Messages API.
 
 Provides:
-* :class:`ClaudeClient` — retrying ``messages.create`` calls plus a helper to
+* :class:`ClaudeClient`: retrying ``messages.create`` calls plus a helper to
   coerce model output into JSON.
-* :class:`StubClaudeClient` — an offline drop-in used by ``--dry-run`` and
+* :class:`StubClaudeClient`: an offline drop-in used by ``--dry-run`` and
   tests; it synthesises plausible structured output from the prompt so the
   full agent graph can run with no API key and no network access.
 
