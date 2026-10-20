@@ -55,3 +55,27 @@ def test_stub_complete_returns_json_string():
     text = stub.complete(model="m", system="summarize", prompt="[1] something here.")
     parsed = extract_json(text)
     assert "summary" in parsed
+
+
+class _FakeMessages:
+    def __init__(self):
+        self.calls = 0
+
+    def create(self, **_):
+        self.calls += 1
+        block = type("Block", (), {"type": "text", "text": '{"ok": true}'})()
+        return type("Message", (), {"content": [block], "usage": None})()
+
+
+def test_claude_client_stops_at_the_call_budget():
+    pytest.importorskip("anthropic")
+    from research_assistant.llm import ClaudeClient
+
+    client = ClaudeClient(api_key="test-key", max_calls=2)
+    fake = _FakeMessages()
+    client._client = type("Fake", (), {"messages": fake})()
+    for _ in range(2):
+        assert client.complete_json(model="m", system="s", prompt="p") == {"ok": True}
+    with pytest.raises(LLMError, match="budget of 2"):
+        client.complete_json(model="m", system="s", prompt="p")
+    assert fake.calls == 2

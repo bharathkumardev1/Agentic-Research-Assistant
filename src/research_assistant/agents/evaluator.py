@@ -9,10 +9,11 @@ self-correction behaviour.
 from __future__ import annotations
 
 import json
-from typing import List
+from typing import List, Optional
 
+from ..context import number_sources
 from ..llm import LLMClient
-from ..schemas import Evaluation, PaperSummary, SourceRef
+from ..schemas import Evaluation, PaperSummary, RetrievedChunk, SourceRef
 
 SYSTEM = (
     "You are a critical peer reviewer evaluating a research synthesis. You check "
@@ -28,8 +29,9 @@ Research question:
 Candidate synthesis (JSON):
 {summary_json}
 
-Available source previews (the only evidence that exists):
-{previews}
+Sources the synthesis was written from, numbered as it cites them (the only
+evidence that exists):
+{evidence}
 
 Assess the synthesis and return a single JSON object with EXACTLY these keys:
 {{
@@ -55,13 +57,23 @@ class EvaluatorAgent:
         self.max_tokens = max_tokens
 
     def evaluate(
-        self, question: str, summary: PaperSummary, sources: List[SourceRef]
+        self,
+        question: str,
+        summary: PaperSummary,
+        sources: List[SourceRef],
+        retrieved: Optional[List[RetrievedChunk]] = None,
     ) -> Evaluation:
-        previews = "\n".join(f"[{s.marker}] {s.title}: {s.preview}" for s in sources)
+        if retrieved:
+            # The same numbered passages the summarizer wrote from, in full. Checking claims
+            # against 180-character previews marked claims unsupported whenever the evidence
+            # sat further into the passage.
+            evidence, _ = number_sources(retrieved)
+        else:
+            evidence = "\n".join(f"[{s.marker}] {s.title}: {s.preview}" for s in sources)
         prompt = _PROMPT.format(
             question=question,
             summary_json=json.dumps(summary.model_dump(), indent=2),
-            previews=previews or "(no sources)",
+            evidence=evidence or "(no sources)",
         )
         data = self.client.complete_json(
             model=self.model,

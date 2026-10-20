@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentic-research-assistant"
 version = "0.3.0"
-description = "Multi-agent (Claude + LangGraph) system that reads and synthesizes research papers over a FAISS-backed RAG pipeline, producing citation-backed summaries."
+description = "Answers questions about a set of papers with a citation on every claim: retrieve, summarize and evaluate in a LangGraph loop over FAISS."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Bharath Kumar", email = "bharathkumardev1@users.noreply.github.com" }]
+authors = [{ name = "Bharath Mandha", email = "bharathkumardev1@users.noreply.github.com" }]
 keywords = [
     "llm",
     "rag",

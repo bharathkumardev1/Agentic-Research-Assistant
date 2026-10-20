@@ -74,7 +74,10 @@ def build_graph(
     def evaluate_node(state: ResearchState) -> dict:
         iteration = state.get("iteration", 0) + 1
         evaluation = evaluator.evaluate(
-            state["question"], state["summary"], state.get("sources", [])
+            state["question"],
+            state["summary"],
+            state.get("sources", []),
+            state.get("retrieved", []),
         )
         emit(
             "evaluate",
