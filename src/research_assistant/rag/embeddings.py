@@ -88,7 +88,10 @@ class SentenceTransformerEmbeddings:
             ) from exc
         self.model_name = model_name
         self._model = SentenceTransformer(model_name)
-        self.dim = int(self._model.get_sentence_embedding_dimension())
+        dim = self._model.get_sentence_embedding_dimension()
+        if dim is None:
+            raise ValueError(f"Could not read the embedding dimension of {model_name!r}")
+        self.dim = int(dim)
 
     def embed(self, texts: List[str]) -> np.ndarray:
         vectors = self._model.encode(

@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Protocol
+from typing import TYPE_CHECKING, Any, Dict, List, Protocol
 
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .logging_utils import get_logger
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 logger = get_logger("llm")
 
@@ -137,12 +140,13 @@ class ClaudeClient:
             )
         self.call_count += 1
         logger.info("anthropic call %d/%d model=%s", self.call_count, self.max_calls, model)
+        messages: list[MessageParam] = [{"role": "user", "content": prompt}]
         message = self._client.messages.create(
             model=model,
             max_tokens=max_tokens or self.default_max_tokens,
             temperature=temperature,
             system=system,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
         )
         usage = getattr(message, "usage", None)
         if usage is not None:
