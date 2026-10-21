@@ -110,6 +110,83 @@ def _cmd_qasper_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_eval(args: argparse.Namespace) -> int:
+    import json
+
+    from .eval import qasper as Q
+    from .eval.report import meta, write_markdown
+    from .eval.run import run, sample
+    from .llm import Budget, OpenAIClient, Recorder
+    from .rag.embeddings import get_embeddings
+
+    settings = _settings(None, args.top_k, None)
+    papers = Q.load(Path(args.data_dir) / Q.FILES[args.split])
+    questions = sample(papers, args.sample, args.seed)
+    recorder = Recorder(Path(args.record))
+    budget = Budget(args.cap, spent_usd=recorder.recorded_spend_usd)
+    if not args.replay:
+        recorder.client = OpenAIClient(settings.require_api_key(), settings.call_timeout_seconds,
+                                       settings.call_attempts, budget)
+    embeddings = get_embeddings(settings.embedding_backend, settings.embedding_model_dir, settings.hashing_dim)
+
+    def progress(row: dict) -> None:
+        print(f"{row['question_id']}  {row['system']:<11}  F1 {row['answer_f1']:.2f}  evidence F1 "
+              f"{row['evidence_f1']:.2f}  {row['verdict']:<9}  {row['status']}  ${row['cost_usd']:.4f}")
+
+    res = run(papers, questions, recorder, embeddings, settings.answer_model, settings.review_model,
+              settings.judge_model, settings.top_k, settings.run_deadline_seconds, settings.reasoning_effort or None,
+              on_row=progress)
+    res = {"meta": meta(args.command_line, settings, embeddings, Path(args.data_dir)), "split": args.split,
+           "sample": args.sample, "seed": args.seed, "questions": len(questions),
+           "calls": {"made": recorder.made, "replayed": recorder.replayed},
+           "recorded_spend_usd": round(budget.spent_usd, 6), "cap_usd": args.cap, **res}
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res, indent=1) + "\n")
+    write_markdown(out.parent, out.parent / "RESULTS.md")
+    for system, s in res["summary"]["systems"].items():
+        print(f"{system:<11} answer F1 {s['answer_f1']:.3f}  evidence F1 {s['evidence_f1']:.3f}  "
+              f"judge {s['judge_accuracy']:.3f}  ${s['usd_per_question']:.4f}/question  p95 {s['seconds_p95']:.1f}s")
+    if res["stopped"]:
+        print(f"stopped early: {res['stopped']}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_label_judge(args: argparse.Namespace) -> int:
+    import csv
+    import json
+
+    from .eval import qasper as Q
+    from .eval.run import label_sheet
+
+    results = json.loads(Path(args.results).read_text())
+    questions = {q.question_id: q for p in Q.load(Path(args.data_dir) / Q.FILES[results["split"]])
+                 for q in p.questions}
+    rows = label_sheet(results, questions, args.n)
+    with open(args.out, "w", newline="", encoding="utf8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"{len(rows)} answers to grade in {args.out}: put correct or incorrect in your_verdict")
+    return 0
+
+
+def _cmd_judge_agreement(args: argparse.Namespace) -> int:
+    import json
+
+    from .eval.report import write_markdown
+    from .eval.run import agreement
+
+    path = Path(args.results)
+    results = json.loads(path.read_text())
+    results["judge_check"] = {"labels": args.labels, **agreement(results, args.labels)}
+    path.write_text(json.dumps(results, indent=1) + "\n")
+    write_markdown(path.parent, path.parent / "RESULTS.md")
+    print(json.dumps(results["judge_check"]))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="research-assistant",
                                      description="Answer questions about research papers, citing passages.")
@@ -141,6 +218,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dest", default="data/qasper")
     p.set_defaults(func=_cmd_qasper_download)
 
+    p = sub.add_parser("eval", help="the review loop against a single pass on QASPER")
+    p.add_argument("--split", choices=("dev", "test"), default="dev")
+    p.add_argument("--sample", type=int, default=150, help="questions, drawn with --seed")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--data-dir", default="data/qasper")
+    p.add_argument("--top-k", type=int)
+    p.add_argument("--record", default="results/qasper/calls.jsonl")
+    p.add_argument("--replay", action="store_true", help="recorded replies only; no API key needed")
+    p.add_argument("--cap", type=float, default=25.0, help="USD, over everything in the recording")
+    p.add_argument("--out", default="results/qasper-dev.json")
+    p.set_defaults(func=_cmd_eval)
+
+    p = sub.add_parser("label-judge", help="sample judged answers for a person to grade")
+    p.add_argument("--results", default="results/qasper-test.json")
+    p.add_argument("--data-dir", default="data/qasper")
+    p.add_argument("--n", type=int, default=40)
+    p.add_argument("--out", default="results/qasper/labels.csv")
+    p.set_defaults(func=_cmd_label_judge)
+
+    p = sub.add_parser("judge-agreement", help="how often the judge agrees with your grades")
+    p.add_argument("--results", default="results/qasper-test.json")
+    p.add_argument("--labels", default="results/qasper/labels.csv")
+    p.set_defaults(func=_cmd_judge_agreement)
     return parser
 
 

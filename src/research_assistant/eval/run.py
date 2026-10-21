@@ -1,0 +1,221 @@
+"""QASPER evaluation: the review loop against a single pass, on the same questions.
+
+For each sampled question, the paper's paragraphs are embedded with MiniLM and searched,
+and both systems answer through the same pipeline: ``single pass`` (retrieve, answer) and
+``loop`` (retrieve, answer, review, up to three rounds). Each answer is scored with the
+official answer F1 and evidence F1, plus evidence precision and recall; a judge model says
+correct or incorrect against the annotators' answers, since token F1 punishes a correct
+answer phrased differently. The trace gives each question's seconds, tokens and dollars,
+and how the run stopped.
+
+Questions are a fixed-seed sample of a split, so the dev and test runs can be repeated
+exactly. Every model call goes through a :class:`~research_assistant.llm.Recorder`: a rerun
+replays what was recorded, ``--replay`` needs no key, and the spending cap covers
+everything in the recording. Hitting the cap stops the run and keeps what was finished.
+"""
+
+from __future__ import annotations
+
+import csv
+import random
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+import numpy as np
+
+from ..agents.answerer import AnswerAgent
+from ..agents.evaluator import EvaluatorAgent
+from ..agents.retriever import RetrieverAgent
+from ..graph.workflow import ResearchPipeline
+from ..llm import LLMClient, Request
+from ..rag.embeddings import EmbeddingBackend
+from ..rag.vector_store import VectorStore
+from . import qasper as Q
+
+SYSTEMS = {"single pass": 1, "loop": 3}
+BOOTSTRAP = 10_000
+JUDGE_SYSTEM = (
+    "You grade an answer to a question about a research paper. You get the question, the "
+    "answers that annotators who read the paper wrote, and the answer to grade. It is correct "
+    "if it gives the same information as any one of the annotators' answers: wording, length "
+    "and extra detail don't matter, and numbers may differ only by rounding. When an "
+    "annotator's answer is Unanswerable, an answer saying the paper doesn't say is correct. "
+    "It is incorrect if it contradicts every annotator, answers a different question, or "
+    "hedges between options."
+)
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {"verdict": {"type": "string", "enum": ["correct", "incorrect"]},
+                   "reason": {"type": "string"}},
+    "required": ["verdict", "reason"],
+    "additionalProperties": False,
+}
+
+
+def sample(papers: List[Q.Paper], n: Optional[int], seed: int = 0) -> List[Q.Question]:
+    """``n`` questions drawn with a fixed seed (all of them when n is None), in a stable order."""
+    questions = [q for p in papers for q in p.questions]
+    if n is not None and n < len(questions):
+        questions = random.Random(seed).sample(questions, n)
+    return sorted(questions, key=lambda q: (q.paper_id, q.question_id))
+
+
+def judge_request(question: Q.Question, answer: str, model: str) -> Request:
+    refs = "\n".join(f"- {a.text}" for a in question.answers)
+    return Request(model=model, system=JUDGE_SYSTEM,
+                   prompt=f"Question: {question.text}\n\nAnnotators' answers:\n{refs}\n\nAnswer to grade: {answer}",
+                   max_output_tokens=1024, json_schema=JUDGE_SCHEMA, reasoning_effort="low")
+
+
+def judge(client: LLMClient, question: Q.Question, answer: str, f1: float, model: str) -> Dict[str, Any]:
+    """Exact matches count as correct without a call; anything else goes to the judge."""
+    if f1 == 1.0:
+        return {"verdict": "correct", "reason": "exact match", "judged": False}
+    reply = client.complete(judge_request(question, answer, model))
+    out = reply.json()
+    return {"verdict": out["verdict"], "reason": out["reason"], "judged": True, "judge_model": reply.model,
+            "judge_cost_usd": reply.cost_usd}
+
+
+def failure(row: Dict[str, Any]) -> str:
+    """The first thing that went wrong, in pipeline order."""
+    if row["gold_unanswerable"]:
+        return "correct" if row["declined"] else "answered an unanswerable question"
+    if row["declined"]:
+        return "declined an answerable question"
+    if not row["gold_retrieved"]:
+        return "evidence not retrieved"
+    if not row["gold_cited"]:
+        return "evidence retrieved, not cited"
+    return "correct" if row["verdict"] == "correct" else "cited the evidence, answer wrong"
+
+
+def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, embeddings: EmbeddingBackend,
+        answer_model: str, review_model: str, judge_model: str, top_k: int = 5,
+        deadline_seconds: Optional[float] = 120.0, reasoning_effort: Optional[str] = "low",
+        on_row: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+    by_paper = {p.paper_id: p for p in papers}
+    stores: Dict[str, VectorStore] = {}
+    rows: List[Dict[str, Any]] = []
+    stopped = None
+    for q in questions:
+        paper = by_paper[q.paper_id]
+        if q.paper_id not in stores:
+            stores[q.paper_id] = VectorStore(embeddings)
+            stores[q.paper_id].add(paper.paragraphs)
+        pipeline = ResearchPipeline(RetrieverAgent(stores[q.paper_id], top_k),
+                                    AnswerAgent(client, answer_model, 2048, reasoning_effort),
+                                    EvaluatorAgent(client, review_model, 1024, reasoning_effort),
+                                    max_rounds=max(SYSTEMS.values()), deadline_seconds=deadline_seconds)
+        text_of = {c.chunk_id: c.text for c in paper.paragraphs}
+        gold = set().union(*(a.evidence for a in q.answers))
+        for system, rounds in SYSTEMS.items():
+            # Both systems send the same first-round request, so the loop's first answer is the
+            # single pass's answer replayed: the comparison isolates what the review rounds add.
+            t0 = time.perf_counter()
+            result = pipeline.run(q.text, max_rounds=rounds)
+            if result.status == "budget":
+                stopped = f"spending cap reached at {q.question_id} ({system})"
+                break
+            declined = result.answer.unanswerable
+            answer = Q.UNANSWERABLE if declined else result.answer.answer
+            evidence = [] if declined else [text_of[s.chunk_id] for s in result.cited]
+            retrieved = {text_of[s.chunk_id] for s in result.sources}
+            row: Dict[str, Any] = {
+                "question_id": q.question_id, "paper_id": q.paper_id, "system": system, "answer": answer,
+                "evidence_ids": [] if declined else [s.chunk_id for s in result.cited],
+                **Q.score(q, answer, evidence),
+                "gold_unanswerable": q.unanswerable, "declined": declined,
+                "gold_retrieved": bool(gold & retrieved), "gold_cited": bool(gold & set(evidence)),
+                "status": result.status, "rounds": result.rounds, "seconds": round(time.perf_counter() - t0, 3),
+                "calls": result.trace["calls"], "input_tokens": result.trace["input_tokens"],
+                "output_tokens": result.trace["output_tokens"], "cost_usd": result.trace["cost_usd"],
+                "retries": result.trace["retries"],
+            }
+            row.update(judge(client, q, answer, row["answer_f1"], judge_model))
+            row["failure"] = failure(row)
+            rows.append(row)
+            if on_row:
+                on_row(row)
+        if stopped:
+            break
+    return {"systems": SYSTEMS, "rows": rows, "summary": summarize(rows), "stopped": stopped}
+
+
+def bootstrap_ci(values: np.ndarray, n: int = BOOTSTRAP, seed: int = 0) -> List[float]:
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(values), size=(n, len(values)))
+    lo, hi = np.percentile(values[idx].mean(axis=1), [2.5, 97.5])
+    return [float(lo), float(hi)]
+
+
+def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"systems": {}, "loop_minus_single": {}}
+    for system in SYSTEMS:
+        rs = [r for r in rows if r["system"] == system]
+        if not rs:
+            continue
+        def col(k: str, rs: List[Dict[str, Any]] = rs) -> np.ndarray:
+            return np.array([float(r[k]) for r in rs])
+
+        correct = np.array([r["verdict"] == "correct" for r in rs], dtype=float)
+        unans = [r for r in rs if r["gold_unanswerable"]]
+        answerable = [r for r in rs if not r["gold_unanswerable"]]
+        seconds = col("seconds")
+        out["systems"][system] = {
+            "n": len(rs), "answer_f1": float(col("answer_f1").mean()), "answer_f1_ci95": bootstrap_ci(col("answer_f1")),
+            "evidence_f1": float(col("evidence_f1").mean()), "evidence_f1_ci95": bootstrap_ci(col("evidence_f1")),
+            "evidence_precision": float(col("evidence_precision").mean()),
+            "evidence_recall": float(col("evidence_recall").mean()),
+            "judge_accuracy": float(correct.mean()), "judge_accuracy_ci95": bootstrap_ci(correct),
+            "answer_f1_by_type": {k: float(np.mean([r["answer_f1"] for r in rs if r["answer_kind"] == k]))
+                                  for k in sorted({r["answer_kind"] for r in rs})},
+            "declined_when_unanswerable": (sum(r["declined"] for r in unans) / len(unans)) if unans else None,
+            "declined_when_answerable": (sum(r["declined"] for r in answerable) / len(answerable)) if answerable else None,
+            "seconds_p50": float(np.percentile(seconds, 50)), "seconds_p95": float(np.percentile(seconds, 95)),
+            "usd_per_question": float(col("cost_usd").mean() + np.mean([r.get("judge_cost_usd", 0.0) for r in rs])),
+            "answering_usd_per_question": float(col("cost_usd").mean()),
+            "calls_per_question": float(col("calls").mean()), "rounds_mean": float(col("rounds").mean()),
+            "status": {s: sum(r["status"] == s for r in rs) for s in sorted({r["status"] for r in rs})},
+            "failures": {f: sum(r["failure"] == f for r in rs) for f in sorted({r["failure"] for r in rs})},
+        }
+    pairs: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for r in rows:
+        pairs.setdefault(r["question_id"], {})[r["system"]] = r
+    both = [p for p in pairs.values() if len(p) == len(SYSTEMS)]
+    def value(r: Dict[str, Any], metric: str) -> float:
+        return float(r["verdict"] == "correct") if metric == "verdict" else float(r[metric])
+
+    for metric in ("answer_f1", "evidence_f1", "verdict"):
+        if not both:
+            break
+        d = np.array([value(p["loop"], metric) - value(p["single pass"], metric) for p in both])
+        name = "judge_accuracy" if metric == "verdict" else metric
+        out["loop_minus_single"][name] = {"diff": float(d.mean()), "ci95": bootstrap_ci(d),
+                                          "loop_better": int((d > 0).sum()), "single_better": int((d < 0).sum())}
+    return out
+
+
+def label_sheet(results: Dict[str, Any], questions: Dict[str, Q.Question], n: int = 40, seed: int = 0
+                ) -> List[Dict[str, str]]:
+    """Judged answers, verdict hidden, for a person to grade; exact matches are left out."""
+    judged = [r for r in results["rows"] if r.get("judged")]
+    chosen = random.Random(seed).sample(judged, min(n, len(judged)))
+    return [{"question_id": r["question_id"], "system": r["system"], "question": questions[r["question_id"]].text,
+             "annotators": " | ".join(a.text for a in questions[r["question_id"]].answers),
+             "answer": r["answer"], "your_verdict": ""} for r in chosen]
+
+
+def agreement(results: Dict[str, Any], labels_csv: str) -> Dict[str, Any]:
+    verdicts = {(r["question_id"], r["system"]): r["verdict"] for r in results["rows"]}
+    with open(labels_csv, newline="", encoding="utf8") as fh:
+        labels = [row for row in csv.DictReader(fh) if row["your_verdict"].strip()]
+    pairs = [(row["your_verdict"].strip().lower(), verdicts[(row["question_id"], row["system"])]) for row in labels]
+    if not pairs:
+        return {"labeled": 0}
+    po = sum(a == b for a, b in pairs) / len(pairs)
+    pc = sum((sum(a == c for a, _ in pairs) / len(pairs)) * (sum(b == c for _, b in pairs) / len(pairs))
+             for c in ("correct", "incorrect"))
+    return {"labeled": len(pairs), "agreement": po, "cohens_kappa": (po - pc) / (1 - pc) if pc < 1 else 1.0,
+            "judge_lenient": sum(a == "incorrect" and b == "correct" for a, b in pairs),
+            "judge_strict": sum(a == "correct" and b == "incorrect" for a, b in pairs)}
