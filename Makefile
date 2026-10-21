@@ -1,50 +1,45 @@
-# Convenience targets for the Agentic Research Assistant.
-# Usage: make <target>
+# Usage: make <target>. The eval targets call the API and spend money; everything else is offline.
 
 .DEFAULT_GOAL := help
-PY ?= python
+.PHONY: help install test lint demo qasper eval-dev eval-test check-replay labels agreement replay lock image
 
-.PHONY: help install install-dev demo ingest research test lint format clean frontend-install frontend-dev frontend-build
+help: ## List the targets
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-13s %s\n", $$1, $$2}'
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+install: ## Locked dependencies, then the package in editable mode with the dev tools
+	pip install --require-hashes -r requirements.lock
+	pip install --no-deps -e . && pip install pytest ruff mypy
 
-install: ## Install the package (runtime deps)
-	$(PY) -m pip install -e .
+test: ## Tests, lint and types; offline
+	pytest -q && ruff check src tests && mypy
 
-install-dev: ## Install with dev extras (pytest, ruff)
-	$(PY) -m pip install -e ".[dev]"
+demo: ## The loop on the bundled sample papers with the offline stub
+	python -m research_assistant demo
 
-demo: ## Run the offline end-to-end demo (no API key needed)
-	$(PY) -m research_assistant demo
+qasper: ## Download the QASPER dev and test sets and record the tarballs' SHA-256
+	research-assistant qasper-download
 
-ingest: ## Ingest the bundled sample papers into data/index
-	$(PY) -m research_assistant ingest examples/sample_papers --dry-run
+eval-dev: ## QASPER dev sample, 150 questions; needs OPENAI_API_KEY, $25 cap across the recording
+	research-assistant eval --split dev
 
-research: ## Ask a question against the built index (offline stub)
-	$(PY) -m research_assistant research "What are the main research gaps?" --dry-run
+eval-test: ## QASPER test sample, 150 questions; run once, after dev settled every choice
+	research-assistant eval --split test
 
-test: ## Run the test suite
-	$(PY) -m pytest
+check-replay: ## Rerun every results file from the recording with no key and compare
+	for f in results/qasper-*.json; do research-assistant check-replay $$f || exit 1; done
 
-lint: ## Lint with ruff
-	ruff check src tests
+labels: ## 40 judged test answers for you to grade, verdicts hidden
+	research-assistant label-judge
 
-format: ## Auto-format with ruff
-	ruff check --fix src tests
-	ruff format src tests
+agreement: ## How often the judge agreed with your grades
+	research-assistant judge-agreement
 
-clean: ## Remove caches and build artifacts
-	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .ruff_cache
-	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf data/index data/index_demo
+replay: ## Recorded test runs as JSON for the site, no key
+	research-assistant export-replay
 
-frontend-install: ## Install frontend dependencies
-	cd frontend && npm install
+lock: ## Re-resolve requirements.lock for every platform, with hashes
+	uv pip compile pyproject.toml --extra service -c constraints.txt -o requirements.lock \
+	  --universal --python-version 3.12 --generate-hashes --custom-compile-command "make lock"
 
-frontend-dev: ## Run the frontend dev server
-	cd frontend && npm run dev
-
-frontend-build: ## Build the frontend for production
-	cd frontend && npm run build
+image: ## Build the service image
+	docker build -t research-assistant .
