@@ -4,6 +4,7 @@
 * ``research``  answer a question from the index, with cited passages
 * ``demo``      index the bundled sample papers and answer a sample question (offline unless --live)
 * ``qasper-download``, ``eval``, ``check-replay``, ``label-judge``, ``judge-agreement``  the QASPER evaluation
+* ``export-replay``  recorded runs as JSON for the portfolio site, no key needed
 
 Heavy imports happen inside each command, so ``--help`` is instant and a command never
 needs another command's dependencies.
@@ -226,6 +227,28 @@ def _cmd_judge_agreement(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export_replay(args: argparse.Namespace) -> int:
+    import json
+
+    from .eval import qasper as Q
+    from .eval.replay import export, pick
+    from .eval.runlog import RunLog
+    from .llm import Recorder
+    from .rag.embeddings import get_embeddings
+
+    settings = _settings(None, None, None)
+    results = json.loads(Path(args.results).read_text())
+    papers = Q.load(Path(args.data_dir) / Q.FILES[results["split"]])
+    embeddings = get_embeddings(settings.embedding_backend, settings.embedding_model_dir, settings.hashing_dim)
+    ids = args.question or pick(results, args.n)
+    out = export(papers, results, Recorder(Path(args.record)), RunLog(Path(args.log), write=False), embeddings,
+                 ids, results["meta"]["top_k"], results["meta"]["reasoning_effort"] or None)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.out).write_text(json.dumps(out, indent=1) + "\n")
+    print(f"{len(out['runs'])} recorded runs -> {args.out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="research-assistant",
                                      description="Answer questions about research papers, citing passages.")
@@ -288,6 +311,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--results", default="results/qasper-test.json")
     p.add_argument("--labels", default="results/qasper/labels.csv")
     p.set_defaults(func=_cmd_judge_agreement)
+
+    p = sub.add_parser("export-replay", help="recorded runs as JSON for the site's replay, no key needed")
+    p.add_argument("--results", default="results/qasper-test.json")
+    p.add_argument("--record", default="results/qasper/calls.jsonl")
+    p.add_argument("--log", default="results/qasper/runs.jsonl")
+    p.add_argument("--data-dir", default="data/qasper")
+    p.add_argument("--n", type=int, default=6)
+    p.add_argument("--question", action="append", help="a question id to include (repeatable)")
+    p.add_argument("--out", default="build/replay.json")
+    p.set_defaults(func=_cmd_export_replay)
     return parser
 
 

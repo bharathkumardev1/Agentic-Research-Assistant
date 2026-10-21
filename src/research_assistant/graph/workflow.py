@@ -62,7 +62,8 @@ def build_graph(retriever: RetrieverAgent, answerer: AnswerAgent, evaluator: Eva
             before = {r.chunk.chunk_id for r in state.get("retrieved", [])}
             merged = merge_retrieved(state.get("retrieved", []), found)
             new = sum(r.chunk.chunk_id not in before for r in found)
-            step.info = {"query": state["query"], "new": new, "total": len(merged)}
+            step.info = {"query": state["query"], "new": new, "total": len(merged),
+                         "found": [r.chunk.chunk_id for r in found]}
         emit("retrieve", step.info)
         update = {"retrieved": merged, "queries": [*state.get("queries", []), state["query"]], "round": rnd}
         if rnd > 1 and new == 0:  # the last answer already saw every passage this query found
@@ -81,7 +82,8 @@ def build_graph(retriever: RetrieverAgent, answerer: AnswerAgent, evaluator: Eva
             if reply is not None:
                 step.calls.append(reply)
             step.info = {"passages": len(sources), "evidence": answer.evidence,
-                         "unanswerable": answer.unanswerable}
+                         "unanswerable": answer.unanswerable, "answer": answer.answer,
+                         "cited": [s.chunk_id for s in sources if s.marker in set(answer.evidence)]}
         emit("answer", step.info)
         return {"answer": answer, "sources": sources}
 

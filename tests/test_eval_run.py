@@ -147,3 +147,45 @@ def test_a_deadline_stop_replays_as_a_deadline(tmp_path):
     again = evaluate(Recorder(record), log)
     replayed = next(r for r in again["rows"] if r["question_id"] == loop["question_id"] and r["system"] == "loop")
     assert replayed["status"] == "deadline" and replayed["calls"] == 1 and replayed["rounds"] == 1
+
+
+def test_replay_export_rebuilds_each_round_from_the_recording(tmp_path):
+    from research_assistant.eval.replay import export, outcome, pick
+
+    record, log = tmp_path / "calls.jsonl", RunLog(tmp_path / "runs.jsonl")
+    res = stub_meta(evaluate(Recorder(record, StubClient()), log))
+    ids = pick(res, 2)
+    assert len(ids) == 2
+    out = export(Q.load(MINI), res, Recorder(record), log, HashingEmbeddings(256), ids, 2, "low")
+    run_ = out["runs"][0]
+    rows = {r["system"]: r for r in res["rows"] if r["question_id"] == ids[0]}
+    assert run_["outcome"] == outcome(rows["single pass"], rows["loop"])
+    first, single = run_["loop"]["rounds"][0], run_["single pass"]["rounds"]
+    assert first["query"] == run_["question"] and first["found"] and first["answer"]["text"]
+    assert "review" in first and len(single) == 1 and "review" not in single[0]
+    assert set(first["found"]) <= set(run_["passages"])
+    assert run_["loop"]["status"] == rows["loop"]["status"]
+
+
+def test_replay_export_stops_where_the_deadline_stopped_the_run(tmp_path):
+    from research_assistant.eval.replay import export
+
+    record, log = tmp_path / "calls.jsonl", RunLog(tmp_path / "runs.jsonl")
+    first = evaluate(Recorder(record, StubClient()), log)
+    qid = first["rows"][0]["question_id"]
+    log.stops[stop_key(qid, "loop")] = {"status": "deadline", "calls": 1}
+    res = stub_meta(evaluate(Recorder(record), log))
+    out = export(Q.load(MINI), res, Recorder(record), log, HashingEmbeddings(256), [qid], 2, "low")
+    assert out["runs"][0]["loop"]["status"] == "deadline"
+    assert len(out["runs"][0]["loop"]["rounds"]) == 1
+
+
+def test_replay_export_refuses_a_results_file_the_recording_doesnt_match(tmp_path):
+    from research_assistant.eval.replay import export
+
+    record, log = tmp_path / "calls.jsonl", RunLog(tmp_path / "runs.jsonl")
+    res = stub_meta(evaluate(Recorder(record, StubClient()), log))
+    res["rows"][1]["evidence_ids"] = ["not-a-passage"]
+    with pytest.raises(ValueError, match="replayed differently"):
+        export(Q.load(MINI), res, Recorder(record), log, HashingEmbeddings(256), [res["rows"][1]["question_id"]],
+               2, "low")
