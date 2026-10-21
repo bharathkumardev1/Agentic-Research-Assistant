@@ -1,15 +1,17 @@
 """The answer loop as a LangGraph graph.
 
     START -> retrieve -> answer --(single pass)--------------------------------> END
-                           |
-                           +--> review --(sufficient, round cap, deadline)-----> END
-                                   |
-                                   +--(needs more: refined query)--> retrieve
+                ^          |
+                |          +--> review --(sufficient, round cap, deadline)-----> END
+                |                  |
+                +--(refined query; stop if it finds no new passage)--+
 
-Three things bound a run, and each one ends it with the best answer so far and a status
+Four things bound a run, and each one ends it with the best answer so far and a status
 that says why it stopped:
 
 * the round cap (``max_rounds``; 1 is the single-pass baseline),
+* a refined query that finds no passage the run hasn't seen ("no new passages"): answering
+  again from the same passages would only repeat the last answer,
 * the deadline, checked before every model call (``deadline_seconds``),
 * the budget, which the client enforces before every call.
 
@@ -59,10 +61,13 @@ def build_graph(retriever: RetrieverAgent, answerer: AnswerAgent, evaluator: Eva
             found = retriever.retrieve(state["query"])
             before = {r.chunk.chunk_id for r in state.get("retrieved", [])}
             merged = merge_retrieved(state.get("retrieved", []), found)
-            step.info = {"query": state["query"], "new": sum(r.chunk.chunk_id not in before for r in found),
-                         "total": len(merged)}
+            new = sum(r.chunk.chunk_id not in before for r in found)
+            step.info = {"query": state["query"], "new": new, "total": len(merged)}
         emit("retrieve", step.info)
-        return {"retrieved": merged, "queries": [*state.get("queries", []), state["query"]], "round": rnd}
+        update = {"retrieved": merged, "queries": [*state.get("queries", []), state["query"]], "round": rnd}
+        if rnd > 1 and new == 0:  # the last answer already saw every passage this query found
+            update.update(status="no new passages", round=rnd - 1)
+        return update
 
     def answer_node(state: ResearchState) -> dict:
         trace, rnd = state["trace"], state["round"]
@@ -97,6 +102,9 @@ def build_graph(retriever: RetrieverAgent, answerer: AnswerAgent, evaluator: Eva
             update["query"] = review.refined_query
         return update
 
+    def after_retrieve(state: ResearchState) -> str:
+        return "end" if state.get("status") else "answer"
+
     def after_answer(state: ResearchState) -> str:
         if state.get("status") or state["max_rounds"] == 1:
             return "end"
@@ -121,7 +129,7 @@ def build_graph(retriever: RetrieverAgent, answerer: AnswerAgent, evaluator: Eva
     graph.add_node("review", review_node)
     graph.add_node("cap", cap_node)
     graph.add_edge(START, "retrieve")
-    graph.add_edge("retrieve", "answer")
+    graph.add_conditional_edges("retrieve", after_retrieve, {"answer": "answer", "end": END})
     graph.add_conditional_edges("answer", after_answer, {"review": "review", "end": END})
     graph.add_conditional_edges("review", after_review, {"retrieve": "retrieve", "cap": "cap", "end": END})
     graph.add_edge("cap", END)
