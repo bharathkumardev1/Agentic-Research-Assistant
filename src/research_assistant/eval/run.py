@@ -81,16 +81,21 @@ def judge(client: LLMClient, question: Q.Question, answer: str, f1: float, model
 
 
 def failure(row: Dict[str, Any]) -> str:
-    """The first thing that went wrong, in pipeline order."""
+    """For a wrong answer, the first thing that went wrong, in pipeline order.
+
+    Correct comes first: when annotators disagree, declining can match the one who said
+    unanswerable, and that answer is right even though others answered."""
+    if row["verdict"] == "correct":
+        return "correct"
     if row["gold_unanswerable"]:
-        return "correct" if row["declined"] else "answered an unanswerable question"
+        return "answered an unanswerable question"
     if row["declined"]:
         return "declined an answerable question"
     if not row["gold_retrieved"]:
         return "evidence not retrieved"
     if not row["gold_cited"]:
         return "evidence retrieved, not cited"
-    return "correct" if row["verdict"] == "correct" else "cited the evidence, answer wrong"
+    return "cited the evidence, answer wrong"
 
 
 def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, embeddings: EmbeddingBackend,
