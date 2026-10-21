@@ -102,6 +102,14 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     return _run(question, settings, dry_run, args.output, args.json)
 
 
+def _cmd_qasper_download(args: argparse.Namespace) -> int:
+    from .eval.qasper import download
+
+    for name, digest in download(Path(args.dest)).items():
+        print(f"{name}: sha256 {digest}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="research-assistant",
                                      description="Answer questions about research papers, citing passages.")
@@ -128,11 +136,20 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             p.add_argument("--live", action="store_true", help="call the model instead of the offline stub")
         p.set_defaults(func=func)
+
+    p = sub.add_parser("qasper-download", help="fetch the QASPER dev and test sets")
+    p.add_argument("--dest", default="data/qasper")
+    p.set_defaults(func=_cmd_qasper_download)
+
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    import shlex
+
+    argv = sys.argv[1:] if argv is None else argv
     args = build_parser().parse_args(argv)
+    args.command_line = shlex.join(["research-assistant", *argv])
     try:
         return args.func(args)
     except KeyboardInterrupt:  # pragma: no cover
