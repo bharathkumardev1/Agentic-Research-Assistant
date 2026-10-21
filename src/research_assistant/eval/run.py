@@ -9,9 +9,11 @@ answer phrased differently. The trace gives each question's seconds, tokens and 
 and how the run stopped.
 
 Questions are a fixed-seed sample of a split, so the dev and test runs can be repeated
-exactly. Every model call goes through a :class:`~research_assistant.llm.Recorder`: a rerun
-replays what was recorded, ``--replay`` needs no key, and the spending cap covers
+exactly. Every model call goes through a :class:`~research_assistant.llm.Recorder`, and
+every search and every run's stop goes to a :class:`~research_assistant.eval.runlog.RunLog`:
+a rerun replays what was recorded, ``--replay`` needs no key, and the spending cap covers
 everything in the recording. Hitting the cap stops the run and keeps what was finished.
+:func:`differences` compares a replay with the results file it should reproduce.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from __future__ import annotations
 import csv
 import random
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -31,6 +33,7 @@ from ..llm import LLMClient, Request
 from ..rag.embeddings import EmbeddingBackend
 from ..rag.vector_store import VectorStore
 from . import qasper as Q
+from .runlog import LoggedRetriever, RecordedStop, RunLog
 
 SYSTEMS = {"single pass": 1, "loop": 3}
 BOOTSTRAP = 10_000
@@ -93,7 +96,10 @@ def failure(row: Dict[str, Any]) -> str:
 def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, embeddings: EmbeddingBackend,
         answer_model: str, review_model: str, judge_model: str, top_k: int = 5,
         deadline_seconds: Optional[float] = 120.0, reasoning_effort: Optional[str] = "low",
-        on_row: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+        on_row: Optional[Callable[[Dict[str, Any]], None]] = None, log: Optional[RunLog] = None,
+        only: Optional[Set[Tuple[str, str]]] = None) -> Dict[str, Any]:
+    """``only`` limits the run to these (question id, system) pairs, which is how a replay
+    covers exactly what a results file has, even when the cap stopped that run partway."""
     by_paper = {p.paper_id: p for p in papers}
     stores: Dict[str, VectorStore] = {}
     rows: List[Dict[str, Any]] = []
@@ -103,20 +109,27 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
         if q.paper_id not in stores:
             stores[q.paper_id] = VectorStore(embeddings)
             stores[q.paper_id].add(paper.paragraphs)
-        pipeline = ResearchPipeline(RetrieverAgent(stores[q.paper_id], top_k),
+        retriever = (LoggedRetriever(stores[q.paper_id], top_k, log, q.paper_id) if log is not None
+                     else RetrieverAgent(stores[q.paper_id], top_k))
+        pipeline = ResearchPipeline(retriever,
                                     AnswerAgent(client, answer_model, 2048, reasoning_effort),
                                     EvaluatorAgent(client, review_model, 1024, reasoning_effort),
                                     max_rounds=max(SYSTEMS.values()), deadline_seconds=deadline_seconds)
         text_of = {c.chunk_id: c.text for c in paper.paragraphs}
         gold = set().union(*(a.evidence for a in q.answers))
         for system, rounds in SYSTEMS.items():
+            if only is not None and (q.question_id, system) not in only:
+                continue
             # Both systems send the same first-round request, so the loop's first answer is the
             # single pass's answer replayed: the comparison isolates what the review rounds add.
+            stop = log.stop(q.question_id, system) if log is not None else None
             t0 = time.perf_counter()
-            result = pipeline.run(q.text, max_rounds=rounds)
+            result = pipeline.run(q.text, max_rounds=rounds, trace=RecordedStop(stop) if stop else None)
             if result.status == "budget":
                 stopped = f"spending cap reached at {q.question_id} ({system})"
                 break
+            if log is not None and stop is None:
+                log.add_stop(q.question_id, system, result.status, result.trace["calls"])
             declined = result.answer.unanswerable
             answer = Q.UNANSWERABLE if declined else result.answer.answer
             evidence = [] if declined else [text_of[s.chunk_id] for s in result.cited]
@@ -219,3 +232,43 @@ def agreement(results: Dict[str, Any], labels_csv: str) -> Dict[str, Any]:
     return {"labeled": len(pairs), "agreement": po, "cohens_kappa": (po - pc) / (1 - pc) if pc < 1 else 1.0,
             "judge_lenient": sum(a == "incorrect" and b == "correct" for a, b in pairs),
             "judge_strict": sum(a == "correct" and b == "incorrect" for a, b in pairs)}
+
+
+TIMING = {"seconds", "seconds_p50", "seconds_p95"}  # wall time; a replay doesn't wait on the API
+
+
+def _same(a: Any, b: Any) -> bool:
+    if isinstance(a, float) or isinstance(b, float):
+        return isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(a - b) <= 1e-9
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a if k not in TIMING)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    return bool(a == b)
+
+
+def differences(expected: Dict[str, Any], actual: Dict[str, Any]) -> List[str]:
+    """Everything a replay changed relative to a results file, timings aside."""
+    out = []
+    want, got = expected["meta"].get("qasper_tarballs_sha256"), actual["meta"].get("qasper_tarballs_sha256")
+    if want and got != want:
+        out.append(f"QASPER tarballs: expected sha256 {want}, downloaded {got}")
+    rows = {(r["question_id"], r["system"]): r for r in actual["rows"]}
+    for r in expected["rows"]:
+        key = (r["question_id"], r["system"])
+        if key not in rows:
+            out.append(f"{key}: not in the replay")
+            continue
+        out += [f"{key} {k}: expected {v!r}, replayed {rows[key].get(k)!r}"
+                for k, v in r.items() if k not in TIMING and not _same(v, rows[key].get(k))]
+    extra = set(rows) - {(r["question_id"], r["system"]) for r in expected["rows"]}
+    out += [f"{key}: in the replay only" for key in sorted(extra)]
+    for name, summary in expected["summary"]["systems"].items():
+        replayed = actual["summary"]["systems"].get(name, {})
+        out += [f"summary {name} {k}: expected {v!r}, replayed {replayed.get(k)!r}"
+                for k, v in summary.items() if k not in TIMING and not _same(v, replayed.get(k))]
+    for k, v in expected["summary"]["loop_minus_single"].items():
+        if not _same(v, actual["summary"]["loop_minus_single"].get(k)):
+            out.append(f"loop minus single {k}: expected {v!r}, replayed "
+                       f"{actual['summary']['loop_minus_single'].get(k)!r}")
+    return out

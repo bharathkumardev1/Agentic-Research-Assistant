@@ -30,7 +30,8 @@ def meta(command: str, settings: Any, embeddings: Any, data_dir: Path) -> Dict[s
         "answer_model": settings.answer_model, "review_model": settings.review_model,
         "judge_model": settings.judge_model, "reasoning_effort": settings.reasoning_effort,
         "top_k": settings.top_k, "deadline_seconds": settings.run_deadline_seconds,
-        "embeddings": embeddings.name, "cpus": os.cpu_count(),
+        "embeddings": embeddings.name, "platform": f"{platform.system()} {platform.machine()}",
+        "cpus": os.cpu_count(),
         "qasper_tarballs_sha256": json.loads(tarballs.read_text()) if tarballs.exists() else None,
     }
 
