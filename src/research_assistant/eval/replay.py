@@ -14,14 +14,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from ..agents.answerer import AnswerAgent
-from ..agents.evaluator import EvaluatorAgent
-from ..graph.workflow import ResearchPipeline
 from ..llm import LLMClient
 from ..rag.embeddings import EmbeddingBackend
 from ..rag.vector_store import VectorStore
 from . import qasper as Q
-from .run import SYSTEMS
+from .run import SYSTEMS, pipeline
 from .runlog import LoggedRetriever, RecordedStop, RunLog
 
 OUTCOMES = ["review fixed it", "review broke it", "both wrong", "both right"]
@@ -86,15 +83,13 @@ def export(papers: List[Q.Paper], results: Dict[str, Any], client: LLMClient, lo
         paper = by_paper[q.paper_id]
         store = VectorStore(embeddings)
         store.add(paper.paragraphs)
-        pipeline = ResearchPipeline(LoggedRetriever(store, top_k, log, q.paper_id),
-                                    AnswerAgent(client, meta["answer_model"], 2048, reasoning_effort),
-                                    EvaluatorAgent(client, meta["review_model"], 1024, reasoning_effort),
-                                    max_rounds=max(SYSTEMS.values()), deadline_seconds=None)
+        pipe = pipeline(LoggedRetriever(store, top_k, log, q.paper_id), client, meta["answer_model"],
+                        meta["review_model"], reasoning_effort, None)
         systems: Dict[str, Any] = {}
         for system, max_rounds in SYSTEMS.items():
             row = rows[(qid, system)]
             stop = log.stop(qid, system) or {"status": row["status"], "calls": row["calls"]}
-            result = pipeline.run(q.text, max_rounds=max_rounds, trace=RecordedStop(stop))
+            result = pipe.run(q.text, max_rounds=max_rounds, trace=RecordedStop(stop))
             systems[system] = {
                 "status": result.status, "rounds": rounds(result.trace),
                 "final": {"answer": row["answer"], "cited": row["evidence_ids"]},

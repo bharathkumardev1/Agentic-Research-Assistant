@@ -37,6 +37,10 @@ from .runlog import LoggedRetriever, RecordedStop, RunLog
 
 SYSTEMS = {"single pass": 1, "loop": 3}
 BOOTSTRAP = 10_000
+# Reasoning tokens count against the output allowance, and a reply cut short fails the call.
+# Raising it later would change every request's hash and void the recording, so it's generous
+# from the start; only the tokens actually produced are billed.
+OUTPUT_TOKENS = 2048
 JUDGE_SYSTEM = (
     "You grade an answer to a question about a research paper. You get the question, the "
     "answers that annotators who read the paper wrote, and the answer to grade. It is correct "
@@ -67,7 +71,7 @@ def judge_request(question: Q.Question, answer: str, model: str) -> Request:
     refs = "\n".join(f"- {a.text}" for a in question.answers)
     return Request(model=model, system=JUDGE_SYSTEM,
                    prompt=f"Question: {question.text}\n\nAnnotators' answers:\n{refs}\n\nAnswer to grade: {answer}",
-                   max_output_tokens=1024, json_schema=JUDGE_SCHEMA, reasoning_effort="low")
+                   max_output_tokens=OUTPUT_TOKENS, json_schema=JUDGE_SCHEMA, reasoning_effort="low")
 
 
 def judge(client: LLMClient, question: Q.Question, answer: str, f1: float, model: str) -> Dict[str, Any]:
@@ -78,6 +82,14 @@ def judge(client: LLMClient, question: Q.Question, answer: str, f1: float, model
     out = reply.json()
     return {"verdict": out["verdict"], "reason": out["reason"], "judged": True, "judge_model": reply.model,
             "judge_cost_usd": reply.cost_usd}
+
+
+def pipeline(retriever: RetrieverAgent, client: LLMClient, answer_model: str, review_model: str,
+             reasoning_effort: Optional[str], deadline_seconds: Optional[float]) -> ResearchPipeline:
+    """The pipeline both systems run; the replay export builds it here too, so its requests match."""
+    return ResearchPipeline(retriever, AnswerAgent(client, answer_model, OUTPUT_TOKENS, reasoning_effort),
+                            EvaluatorAgent(client, review_model, OUTPUT_TOKENS, reasoning_effort),
+                            max_rounds=max(SYSTEMS.values()), deadline_seconds=deadline_seconds)
 
 
 def failure(row: Dict[str, Any]) -> str:
@@ -116,10 +128,7 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
             stores[q.paper_id].add(paper.paragraphs)
         retriever = (LoggedRetriever(stores[q.paper_id], top_k, log, q.paper_id) if log is not None
                      else RetrieverAgent(stores[q.paper_id], top_k))
-        pipeline = ResearchPipeline(retriever,
-                                    AnswerAgent(client, answer_model, 2048, reasoning_effort),
-                                    EvaluatorAgent(client, review_model, 1024, reasoning_effort),
-                                    max_rounds=max(SYSTEMS.values()), deadline_seconds=deadline_seconds)
+        pipe = pipeline(retriever, client, answer_model, review_model, reasoning_effort, deadline_seconds)
         text_of = {c.chunk_id: c.text for c in paper.paragraphs}
         gold = set().union(*(a.evidence for a in q.answers))
         for system, rounds in SYSTEMS.items():
@@ -129,7 +138,7 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
             # single pass's answer replayed: the comparison isolates what the review rounds add.
             stop = log.stop(q.question_id, system) if log is not None else None
             t0 = time.perf_counter()
-            result = pipeline.run(q.text, max_rounds=rounds, trace=RecordedStop(stop) if stop else None)
+            result = pipe.run(q.text, max_rounds=rounds, trace=RecordedStop(stop) if stop else None)
             if result.status == "budget":
                 stopped = f"spending cap reached at {q.question_id} ({system})"
                 break

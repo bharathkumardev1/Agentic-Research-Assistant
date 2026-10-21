@@ -78,7 +78,7 @@ def build_pipeline(
     return ResearchPipeline(
         RetrieverAgent(store, top_k=settings.top_k),
         AnswerAgent(client, settings.answer_model, settings.max_output_tokens, effort),
-        EvaluatorAgent(client, settings.review_model, min(settings.max_output_tokens, 1024), effort),
+        EvaluatorAgent(client, settings.review_model, settings.max_output_tokens, effort),
         max_rounds=settings.max_rounds,
         deadline_seconds=settings.run_deadline_seconds,
         on_event=on_event,
