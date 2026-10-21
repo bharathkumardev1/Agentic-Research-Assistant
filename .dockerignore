@@ -6,9 +6,12 @@ __pycache__
 *.pyc
 .pytest_cache
 .ruff_cache
+.mypy_cache
 *.egg-info
-data/index
-data/index_demo
-data/raw
+build
+data
+models
+results
+tests
 .env
 .DS_Store
