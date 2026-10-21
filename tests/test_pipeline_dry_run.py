@@ -2,7 +2,6 @@
 
 import pytest
 
-pytest.importorskip("faiss", reason="faiss-cpu not installed")
 pytest.importorskip("langgraph", reason="langgraph not installed")
 
 from research_assistant.config import Settings  # noqa: E402

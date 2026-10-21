@@ -24,7 +24,7 @@ env/
 data/index/
 data/index_demo/
 data/raw/
-*.faiss
+models/
 
 # OS / editor
 .DS_Store

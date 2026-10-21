@@ -49,7 +49,7 @@ from .config import get_settings
 from .factory import build_client, build_index, build_pipeline, load_index
 from .ingestion.loaders import load_paths
 from .logging_utils import get_logger
-from .rag.vector_store import FaissVectorStore
+from .rag.vector_store import VectorStore
 from .rate_limit import RateLimiter
 
 logger = get_logger("webapp")
@@ -81,7 +81,7 @@ def _load_default_pipeline() -> None:
     # real embedding backend if there's actually a persisted index on disk;
     # otherwise fall straight through to the fast offline demo path below.
     store = None
-    if FaissVectorStore.exists(settings.index_dir):
+    if VectorStore.exists(settings.index_dir):
         try:
             store = load_index(settings, dry_run=False)
             logger.info(

@@ -1,4 +1,7 @@
-"""Tests for the dependency-free hashing embedding backend."""
+"""The embedding backends: the hashing fallback, and MiniLM against recorded vectors."""
+
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -66,3 +69,29 @@ def test_factory_selects_hashing_backend():
 def test_factory_rejects_unknown_backend():
     with pytest.raises(ValueError):
         get_embeddings("does-not-exist")
+
+
+MODEL_DIR = Path("models/all-MiniLM-L6-v2")
+GOLDEN = Path(__file__).parent / "fixtures" / "minilm_golden.json"
+
+
+@pytest.mark.skipif(not (MODEL_DIR / "onnx" / "model.onnx").exists(), reason="MiniLM not downloaded")
+def test_minilm_reproduces_the_recorded_vectors():
+    from research_assistant.rag.embeddings import MiniLMEmbeddings
+
+    golden = json.loads(GOLDEN.read_text())
+    got = MiniLMEmbeddings(MODEL_DIR).embed(golden["texts"])
+    assert got.shape == (3, 384)
+    np.testing.assert_allclose(np.linalg.norm(got, axis=1), 1.0, atol=1e-5)
+    np.testing.assert_allclose(got[:, :8], np.array(golden["first8"]), atol=1e-4)
+
+
+def test_minilm_refuses_weights_that_are_not_the_official_ones(tmp_path):
+    from research_assistant.rag.embeddings import download_minilm
+
+    src = tmp_path / "mirror"
+    (src / "onnx").mkdir(parents=True)
+    (src / "onnx" / "model.onnx").write_bytes(b"not the model")
+    (src / "tokenizer.json").write_text("{}")
+    with pytest.raises(RuntimeError, match="not the official"):
+        download_minilm(tmp_path / "dest", base=src.as_uri())

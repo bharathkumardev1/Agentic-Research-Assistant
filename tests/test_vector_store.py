@@ -1,15 +1,9 @@
-"""Tests for the FAISS-backed vector store.
-
-Skipped automatically when ``faiss-cpu`` is not installed so the lightweight
-test run stays green; CI installs the full dependency set.
-"""
+"""Tests for the exact numpy vector store."""
 
 import pytest
 
-pytest.importorskip("faiss", reason="faiss-cpu not installed")
-
 from research_assistant.rag.embeddings import HashingEmbeddings  # noqa: E402
-from research_assistant.rag.vector_store import FaissVectorStore  # noqa: E402
+from research_assistant.rag.vector_store import VectorStore  # noqa: E402
 from research_assistant.schemas import Chunk  # noqa: E402
 
 
@@ -33,7 +27,7 @@ def _chunks():
 
 
 def _store():
-    store = FaissVectorStore(HashingEmbeddings(dim=512))
+    store = VectorStore(HashingEmbeddings(dim=512))
     store.add(_chunks())
     return store
 
@@ -65,18 +59,18 @@ def test_search_k_is_capped_at_corpus_size():
 
 
 def test_empty_store_returns_no_results():
-    store = FaissVectorStore(HashingEmbeddings(dim=64))
+    store = VectorStore(HashingEmbeddings(dim=64))
     assert store.search("query", k=5) == []
 
 
 def test_save_and_load_roundtrip(tmp_path):
     store = _store()
     store.save(tmp_path)
-    assert (tmp_path / "index.faiss").exists()
+    assert (tmp_path / "vectors.npy").exists()
     assert (tmp_path / "chunks.jsonl").exists()
     assert (tmp_path / "meta.json").exists()
 
-    reloaded = FaissVectorStore.load(tmp_path, HashingEmbeddings(dim=512))
+    reloaded = VectorStore.load(tmp_path, HashingEmbeddings(dim=512))
     assert len(reloaded) == len(store)
     original = store.search("multi-agent critique loop", k=2)
     restored = reloaded.search("multi-agent critique loop", k=2)
@@ -87,9 +81,9 @@ def test_load_rejects_dim_mismatch(tmp_path):
     store = _store()
     store.save(tmp_path)
     with pytest.raises(ValueError):
-        FaissVectorStore.load(tmp_path, HashingEmbeddings(dim=128))
+        VectorStore.load(tmp_path, HashingEmbeddings(dim=128))
 
 
 def test_load_missing_index_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        FaissVectorStore.load(tmp_path, HashingEmbeddings(dim=512))
+        VectorStore.load(tmp_path, HashingEmbeddings(dim=512))
