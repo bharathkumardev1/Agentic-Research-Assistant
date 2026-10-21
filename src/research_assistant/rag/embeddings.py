@@ -1,21 +1,19 @@
-"""Embedding backends.
+"""Embedding backends behind one small protocol.
 
-Two interchangeable implementations are provided behind a common protocol:
+* :class:`MiniLMEmbeddings`: all-MiniLM-L6-v2 through ONNX Runtime, the default. It needs
+  no PyTorch, which keeps the image a few hundred MB instead of a few GB.
+* :class:`HashingEmbeddings`: a deterministic bag-of-words hash for tests and ``--dry-run``,
+  so everything runs with no model download.
 
-* :class:`SentenceTransformerEmbeddings` — high-quality dense embeddings via
-  ``sentence-transformers`` (the production default).
-* :class:`HashingEmbeddings` — a deterministic, dependency-free bag-of-words
-  hashing embedding used for offline tests and ``--dry-run`` demos, so the
-  whole pipeline can run without downloading a model.
-
-Both return L2-normalised ``float32`` vectors, which lets the FAISS
-``IndexFlatIP`` index compute cosine similarity directly.
+Both return L2-normalized float32 vectors, so a dot product is the cosine similarity.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+import urllib.request
+from pathlib import Path
 from typing import List, Protocol, runtime_checkable
 
 import numpy as np
@@ -71,50 +69,95 @@ class HashingEmbeddings:
         return _normalize_rows(matrix)
 
 
-class SentenceTransformerEmbeddings:
-    """Dense embeddings backed by a ``sentence-transformers`` model."""
+MINILM_ID = "sentence-transformers/all-MiniLM-L6-v2"
+MINILM_SHA256 = "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"
+MINILM_FILES = ("onnx/model.onnx", "tokenizer.json")
+MAX_TOKENS = 256
 
-    name = "sentence-transformers"
 
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> None:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError as exc:  # pragma: no cover - import guard
-            raise ImportError(
-                "The 'sentence-transformers' backend requires the package of the "
-                "same name. Install it with: pip install sentence-transformers\n"
-                "Alternatively set EMBEDDING_BACKEND=hashing for a lightweight, "
-                "dependency-free fallback."
-            ) from exc
-        self.model_name = model_name
-        self._model = SentenceTransformer(model_name)
-        dim = self._model.get_sentence_embedding_dimension()
-        if dim is None:
-            raise ValueError(f"{model_name} doesn't report an embedding dimension")
-        self.dim = int(dim)
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def download_minilm(dest: Path, base: str = f"https://huggingface.co/{MINILM_ID}/resolve/main") -> Path:
+    """Fetch the ONNX export and tokenizer; refuse weights that aren't the official ones."""
+    dest = Path(dest)
+    for name in MINILM_FILES:
+        target = dest / name
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".part")
+            urllib.request.urlretrieve(f"{base}/{name}", tmp)
+            tmp.replace(target)
+    got = _sha256(dest / "onnx" / "model.onnx")
+    if got != MINILM_SHA256:
+        raise RuntimeError(f"model.onnx has sha256 {got}, not the official {MINILM_SHA256}")
+    return dest
+
+
+class MiniLMEmbeddings:
+    """all-MiniLM-L6-v2 through ONNX Runtime: no PyTorch, weights pinned by SHA-256.
+
+    A text becomes a vector the way sentence-transformers does it for this model: lowercased
+    WordPiece tokens between [CLS] and [SEP], cut at 256 tokens, mean pooling over the
+    attention mask, L2 normalization.
+    """
+
+    name = "all-MiniLM-L6-v2"
+    dim = 384
+
+    def __init__(self, model_dir: Path, threads: int = 1, batch_size: int = 32) -> None:
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+
+        model_dir = Path(model_dir)
+        if not (model_dir / "onnx" / "model.onnx").exists():
+            download_minilm(model_dir)
+        path = model_dir / "onnx" / "model.onnx"
+        if _sha256(path) != MINILM_SHA256:
+            raise RuntimeError(f"{path} is not the official {MINILM_ID} export")
+        self._tok = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
+        # The published tokenizer.json truncates and pads to 128; this does its own.
+        self._tok.no_truncation()
+        self._tok.no_padding()
+        cls_id, sep_id = self._tok.token_to_id("[CLS]"), self._tok.token_to_id("[SEP]")
+        if cls_id is None or sep_id is None:
+            raise RuntimeError(f"{model_dir / 'tokenizer.json'} has no [CLS] or [SEP] token")
+        self._cls: int = cls_id
+        self._sep: int = sep_id
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = threads
+        self._sess = ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
+        self.batch_size = batch_size
 
     def embed(self, texts: List[str]) -> np.ndarray:
-        vectors = self._model.encode(
-            list(texts),
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
-        return np.asarray(vectors, dtype="float32")
+        seqs = [[self._cls, *self._tok.encode(t, add_special_tokens=False).ids[: MAX_TOKENS - 2], self._sep]
+                for t in texts]
+        out = np.zeros((len(seqs), self.dim), dtype=np.float32)
+        for start in range(0, len(seqs), self.batch_size):
+            batch = seqs[start : start + self.batch_size]
+            width = max(len(x) for x in batch)
+            ids = np.zeros((len(batch), width), dtype=np.int64)
+            mask = np.zeros((len(batch), width), dtype=np.int64)
+            for row, x in enumerate(batch):
+                ids[row, : len(x)] = x
+                mask[row, : len(x)] = 1
+            hidden = self._sess.run(None, {"input_ids": ids, "attention_mask": mask,
+                                           "token_type_ids": np.zeros_like(ids)})[0]
+            m = mask[..., None].astype(np.float32)
+            out[start : start + len(batch)] = (hidden * m).sum(1) / np.clip(m.sum(1), 1e-9, None)
+        return _normalize_rows(out)
 
 
-def get_embeddings(
-    backend: str = "sentence-transformers",
-    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-    hashing_dim: int = 512,
-) -> EmbeddingBackend:
-    """Factory selecting an embedding backend by name."""
+def get_embeddings(backend: str = "minilm", model_dir: Path | str = "models/all-MiniLM-L6-v2",
+                   hashing_dim: int = 512) -> EmbeddingBackend:
     backend = (backend or "").lower()
-    if backend in {"hashing", "hash", "local"}:
+    if backend in {"hashing", "hash"}:
         return HashingEmbeddings(dim=hashing_dim)
-    if backend in {"sentence-transformers", "st", "sbert"}:
-        return SentenceTransformerEmbeddings(model_name=model_name)
-    raise ValueError(
-        f"Unknown embedding backend '{backend}'. "
-        "Choose 'sentence-transformers' or 'hashing'."
-    )
+    if backend in {"minilm", "all-minilm-l6-v2"}:
+        return MiniLMEmbeddings(Path(model_dir))
+    raise ValueError(f"unknown embedding backend {backend!r}; use 'minilm' or 'hashing'")

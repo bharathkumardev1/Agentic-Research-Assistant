@@ -148,7 +148,7 @@ class _FakeStore:
 def test_load_default_pipeline_prefers_a_persisted_index(monkeypatch):
     calls = {"load_index": False, "build_index": False}
 
-    monkeypatch.setattr(webapp.FaissVectorStore, "exists", staticmethod(lambda directory: True))
+    monkeypatch.setattr(webapp.VectorStore, "exists", staticmethod(lambda directory: True))
     monkeypatch.setattr(
         webapp,
         "load_index",
@@ -170,7 +170,7 @@ def test_load_default_pipeline_prefers_a_persisted_index(monkeypatch):
 def test_load_default_pipeline_falls_back_to_demo_papers_when_no_index_exists(monkeypatch):
     calls = {"load_index": False, "build_index": False}
 
-    monkeypatch.setattr(webapp.FaissVectorStore, "exists", staticmethod(lambda directory: False))
+    monkeypatch.setattr(webapp.VectorStore, "exists", staticmethod(lambda directory: False))
     monkeypatch.setattr(
         webapp,
         "load_index",

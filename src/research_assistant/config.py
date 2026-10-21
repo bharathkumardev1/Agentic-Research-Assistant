@@ -69,10 +69,10 @@ class Settings(BaseSettings):
     )
 
     # Embeddings and retrieval.
-    # "sentence-transformers" (default, high quality) or "hashing"
+    # "minilm" (all-MiniLM-L6-v2 through ONNX Runtime, downloaded on first use) or "hashing"
     # (dependency-free, deterministic; used for offline tests / dry runs).
-    embedding_backend: str = Field(default="sentence-transformers")
-    embedding_model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2")
+    embedding_backend: str = Field(default="minilm")
+    embedding_model_dir: Path = Field(default=Path("models/all-MiniLM-L6-v2"))
     hashing_dim: int = Field(default=512, ge=64, description="Dim of hashing fallback.")
 
     chunk_size: int = Field(default=1100, ge=200, description="Max chars per chunk.")

@@ -15,7 +15,6 @@ keywords = [
     "rag",
     "agents",
     "langgraph",
-    "faiss",
     "research",
 ]
 classifiers = [
@@ -29,8 +28,8 @@ classifiers = [
 dependencies = [
     "openai>=3.36,<4",
     "langgraph>=0.2",
-    "faiss-cpu>=1.7.4",
-    "sentence-transformers>=2.6",
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
     "pypdf>=4.0",
     "arxiv>=2.1",
     "pydantic>=2.5",
@@ -86,5 +85,5 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [[tool.mypy.overrides]]
-module = "arxiv"
+module = ["arxiv", "onnxruntime"]
 ignore_missing_imports = true

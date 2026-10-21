@@ -19,18 +19,15 @@ from .ingestion.chunking import chunk_paper
 from .ingestion.loaders import LoadedPaper
 from .llm import Budget, LLMClient, OpenAIClient, StubClient
 from .rag.embeddings import EmbeddingBackend, get_embeddings
-from .rag.vector_store import FaissVectorStore
+from .rag.vector_store import VectorStore
 from .schemas import Chunk
 
 
 def build_embeddings(settings: Settings, dry_run: bool = False) -> EmbeddingBackend:
     if dry_run:
         return get_embeddings("hashing", hashing_dim=settings.hashing_dim)
-    return get_embeddings(
-        settings.embedding_backend,
-        model_name=settings.embedding_model,
-        hashing_dim=settings.hashing_dim,
-    )
+    return get_embeddings(settings.embedding_backend, model_dir=settings.embedding_model_dir,
+                          hashing_dim=settings.hashing_dim)
 
 
 def build_client(settings: Settings, dry_run: bool = False, budget: Budget | None = None) -> LLMClient:
@@ -58,21 +55,21 @@ def build_index(
     papers: List[LoadedPaper],
     settings: Settings,
     dry_run: bool = False,
-) -> FaissVectorStore:
+) -> VectorStore:
     """Chunk papers, embed them and return a populated vector store."""
     embeddings = build_embeddings(settings, dry_run=dry_run)
-    store = FaissVectorStore(embeddings)
+    store = VectorStore(embeddings)
     store.add(chunks_from_papers(papers, settings))
     return store
 
 
-def load_index(settings: Settings, dry_run: bool = False) -> FaissVectorStore:
+def load_index(settings: Settings, dry_run: bool = False) -> VectorStore:
     embeddings = build_embeddings(settings, dry_run=dry_run)
-    return FaissVectorStore.load(Path(settings.index_dir), embeddings)
+    return VectorStore.load(Path(settings.index_dir), embeddings)
 
 
 def build_pipeline(
-    store: FaissVectorStore,
+    store: VectorStore,
     client: LLMClient,
     settings: Settings,
     on_event: EventHook = None,
