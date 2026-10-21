@@ -10,14 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
+from .agents.answerer import AnswerAgent
 from .agents.evaluator import EvaluatorAgent
 from .agents.retriever import RetrieverAgent
-from .agents.summarizer import SummarizerAgent
 from .config import Settings
 from .graph.workflow import EventHook, ResearchPipeline
 from .ingestion.chunking import chunk_paper
 from .ingestion.loaders import LoadedPaper
-from .llm import ClaudeClient, LLMClient, StubClaudeClient
+from .llm import Budget, LLMClient, OpenAIClient, StubClient
 from .rag.embeddings import EmbeddingBackend, get_embeddings
 from .rag.vector_store import FaissVectorStore
 from .schemas import Chunk
@@ -33,14 +33,11 @@ def build_embeddings(settings: Settings, dry_run: bool = False) -> EmbeddingBack
     )
 
 
-def build_client(settings: Settings, dry_run: bool = False) -> LLMClient:
+def build_client(settings: Settings, dry_run: bool = False, budget: Budget | None = None) -> LLMClient:
     if dry_run:
-        return StubClaudeClient()
-    return ClaudeClient(
-        api_key=settings.require_api_key(),
-        default_max_tokens=settings.max_tokens,
-        max_calls=settings.max_api_calls,
-    )
+        return StubClient()
+    return OpenAIClient(api_key=settings.require_api_key(), timeout=settings.call_timeout_seconds,
+                        attempts=settings.call_attempts, budget=budget)
 
 
 def chunks_from_papers(papers: List[LoadedPaper], settings: Settings) -> List[Chunk]:
@@ -80,17 +77,12 @@ def build_pipeline(
     settings: Settings,
     on_event: EventHook = None,
 ) -> ResearchPipeline:
-    retriever = RetrieverAgent(store, top_k=settings.top_k)
-    summarizer = SummarizerAgent(
-        client, model=settings.summarizer_model, max_tokens=settings.max_tokens
-    )
-    evaluator = EvaluatorAgent(
-        client, model=settings.evaluator_model, max_tokens=min(settings.max_tokens, 1024)
-    )
+    effort = settings.reasoning_effort or None
     return ResearchPipeline(
-        retriever,
-        summarizer,
-        evaluator,
-        max_iterations=settings.max_iterations,
+        RetrieverAgent(store, top_k=settings.top_k),
+        AnswerAgent(client, settings.answer_model, settings.max_output_tokens, effort),
+        EvaluatorAgent(client, settings.review_model, min(settings.max_output_tokens, 1024), effort),
+        max_rounds=settings.max_rounds,
+        deadline_seconds=settings.run_deadline_seconds,
         on_event=on_event,
     )

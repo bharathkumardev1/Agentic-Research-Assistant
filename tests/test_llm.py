@@ -1,57 +1,103 @@
-"""Tests for JSON extraction and the offline stub LLM client."""
+"""The model client: pricing, the budget, retries and the recorder."""
+
+import json
 
 import pytest
 
-from research_assistant.llm import LLMError, StubClaudeClient, extract_json
+from research_assistant.llm import (
+    Budget,
+    BudgetExceeded,
+    LLMError,
+    MissingRecording,
+    Recorder,
+    Reply,
+    Request,
+    StubClient,
+    cost,
+    price,
+    with_retries,
+)
+
+REQ = Request(model="gpt-6-luna", system="answer", prompt="[1] (Intro)\nThe sky is blue today.\n\nQuestion: ?",
+              max_output_tokens=100)
 
 
-def test_extract_plain_json():
-    assert extract_json('{"a": 1, "b": "x"}') == {"a": 1, "b": "x"}
+class APITimeoutError(Exception):
+    pass
 
 
-def test_extract_json_from_fenced_block():
-    raw = 'Here you go:\n```json\n{"k": [1, 2, 3]}\n```\nThanks!'
-    assert extract_json(raw) == {"k": [1, 2, 3]}
+class BadRequestError(Exception):
+    status_code = 400
 
 
-def test_extract_json_from_surrounding_prose():
-    raw = 'Sure. {"ok": true} Let me know if you need more.'
-    assert extract_json(raw) == {"ok": True}
+def test_cost_uses_cached_input_and_output_prices():
+    r = Reply("x", "gpt-6-luna", input_tokens=1_000_000, cached_tokens=400_000, output_tokens=100_000)
+    assert cost(r) == pytest.approx(0.6 * 0.10 + 0.4 * 0.01 + 0.1 * 0.50)
+    assert price("gpt-6-luna-2026-05-18") == price("gpt-6-luna")
+    with pytest.raises(KeyError):
+        price("some-unpriced-model")
 
 
-def test_extract_json_raises_on_garbage():
+def test_budget_refuses_a_call_that_could_pass_the_cap():
+    b = Budget(cap_usd=0.001)
+    b.check(REQ)
+    b.charge(Reply("x", "gpt-6-luna", input_tokens=2000, output_tokens=1500))
+    with pytest.raises(BudgetExceeded):
+        b.check(Request(model="gpt-6-luna", system="s", prompt="p" * 3000, max_output_tokens=2000))
+
+
+def test_retries_transient_errors_with_backoff_and_counts_attempts():
+    calls, waits = [], []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise APITimeoutError("timed out")
+        return Reply("ok", "gpt-6-luna")
+
+    reply = with_retries(flaky, attempts=3, backoff=0.5, sleep=waits.append)
+    assert reply.attempts == 3 and waits == [0.5, 1.0]
+
+
+def test_gives_up_after_the_last_attempt_and_never_retries_a_bad_request():
+    with pytest.raises(APITimeoutError):
+        with_retries(lambda: (_ for _ in ()).throw(APITimeoutError()), attempts=2, sleep=lambda s: None)
+    calls = []
+
+    def bad():
+        calls.append(1)
+        raise BadRequestError("nope")
+
+    with pytest.raises(BadRequestError):
+        with_retries(bad, attempts=5, sleep=lambda s: None)
+    assert len(calls) == 1
+
+
+def test_recorder_replays_by_request_and_refuses_unrecorded_calls_in_replay_mode(tmp_path):
+    path = tmp_path / "calls.jsonl"
+    live = Recorder(path, StubClient())
+    first = live.complete(REQ, tag={"q": 1})
+    assert live.made == 1 and not first.replayed
+    replay = Recorder(path)
+    again = replay.complete(REQ)
+    assert again.replayed and again.text == first.text and replay.replayed == 1
+    with pytest.raises(MissingRecording):
+        replay.complete(Request(model="gpt-6-luna", system="answer", prompt="something else"))
+    assert json.loads(path.read_text().splitlines()[0])["tag"] == {"q": 1}
+
+
+def test_reply_json_must_be_an_object():
+    assert Reply('{"a": 1}', "stub").json() == {"a": 1}
     with pytest.raises(LLMError):
-        extract_json("absolutely not json at all")
+        Reply("not json", "stub").json()
+    with pytest.raises(LLMError):
+        Reply("[1, 2]", "stub").json()
 
 
-def test_stub_summary_has_required_keys():
-    stub = StubClaudeClient()
-    prompt = (
-        "Research question: what works?\n\n"
-        '[1] (source: "Paper A")\n'
-        "This sentence describes a concrete method used in the study. "
-        "This second sentence reports a measurable result of the experiment.\n\n"
-        '[2] (source: "Paper B")\n'
-        "Another lengthy sentence that should be long enough to be captured here."
-    )
-    out = stub.complete_json(model="m", system="summarize the sources", prompt=prompt)
-    assert set(out) == {"summary", "methods", "key_findings", "research_gaps"}
-    assert out["summary"].startswith("[dry-run]")
-    assert "[1]" in out["summary"]
-
-
-def test_stub_evaluation_alternates_then_terminates():
-    stub = StubClaudeClient()
-    first = stub.complete_json(model="m", system="evaluate the critique", prompt="x")
-    second = stub.complete_json(model="m", system="evaluate the critique", prompt="x")
-    assert first["sufficiency"] == "needs_more"
-    assert first["refined_query"]
-    assert second["sufficiency"] == "sufficient"
-    assert second["refined_query"] is None
-
-
-def test_stub_complete_returns_json_string():
-    stub = StubClaudeClient()
-    text = stub.complete(model="m", system="summarize", prompt="[1] something here.")
-    parsed = extract_json(text)
-    assert "summary" in parsed
+def test_stub_answers_from_the_passages_then_asks_for_one_more_round():
+    stub = StubClient()
+    answer = stub.complete(REQ).json()
+    assert answer["evidence"] == [1] and "sky is blue" in answer["answer"]
+    review = Request(model="stub", system="You review an answer", prompt="x")
+    assert stub.complete(review).json()["sufficient"] is False
+    assert stub.complete(review).json()["sufficient"] is True

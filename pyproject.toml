@@ -5,18 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentic-research-assistant"
 version = "0.3.0"
-description = "Multi-agent (Claude + LangGraph) system that reads and synthesizes research papers over a FAISS-backed RAG pipeline, producing citation-backed summaries."
+description = "Answers questions about research papers with cited passages, using a retrieve-answer-review loop measured on QASPER."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Bharath Kumar", email = "bharathkumardev1@users.noreply.github.com" }]
+authors = [{ name = "Bharath Mandha" }]
 keywords = [
     "llm",
     "rag",
     "agents",
     "langgraph",
-    "claude",
-    "anthropic",
     "faiss",
     "research",
 ]
@@ -29,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "anthropic>=0.40",
+    "openai>=3.36,<4",
     "langgraph>=0.2",
     "faiss-cpu>=1.7.4",
     "sentence-transformers>=2.6",
@@ -50,7 +48,7 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.4",
-    "mypy>=1.10,<2.0",
+    "mypy>=1.10",
 ]
 
 [project.urls]
@@ -73,13 +71,13 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
-# Keep typing.Optional/List forms: with Python 3.9 support, Pydantic evaluates
-# annotations at runtime and `X | None` / builtin generics are not safe there.
+# The older modules use typing.Optional/List from when Python 3.9 was supported; newer
+# code uses the builtin forms. Not worth churning every file to make them match.
 ignore = ["E501", "UP006", "UP007", "UP035", "UP045"]
 
 [tool.mypy]
