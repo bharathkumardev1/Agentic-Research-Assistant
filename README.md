@@ -1,203 +1,157 @@
 # Agentic Research Assistant
 
-Reads a set of research papers and answers questions about them, with citations. Instead of stuffing everything into one prompt, it runs three small agents in a loop: one retrieves relevant passages, one writes a grounded answer, and one checks that answer and decides whether to go back for more evidence. Built on Claude, LangGraph, and FAISS.
+Answers questions about research papers and cites the passages it used. It retrieves passages, drafts an answer, and has a second model call review that answer against the passages it cites. When the review finds the answer unsupported or incomplete, it writes a new search query and the loop goes around again, up to three rounds.
 
-[![CI](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/bharathkumardev1/Agentic-Research-Assistant/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+What I wanted to know is whether the review loop is worth it. Every extra round costs model calls and seconds, so this repo measures the loop against a single pass (retrieve once, answer once) on QASPER: the dataset's official answer F1 and evidence F1, a model judge that I check against my own grades, and the dollars and seconds each system spends per question.
 
-**Live demo:** https://agentic-research-assistant-xzno.onrender.com/docs
-
-That link opens an interactive API page. Hit "Try it out" on `/research`, type a question, and run it in the browser. No setup. (It's on a free host that sleeps when idle, so the first request after a while takes 30 to 60 seconds to wake up. After that it's quick.)
-
-## Why I built it
-
-Dumping a folder of PDFs into a single LLM call doesn't work well. It hallucinates, it misses the parts you actually care about, and you can't tell which claim came from which paper. I wanted something that behaves more like a person doing a literature review: find the relevant bits, draft an answer, then look at that draft critically and go dig up more if it's thin.
-
-So the work is split across three agents that share one vector store:
-
-- The **retriever** pulls the most relevant chunks for the current query.
-- The **summarizer** asks Claude for an answer that uses only those chunks, and tags every factual sentence with a `[n]` pointing at its source.
-- The **evaluator** is a second Claude call that grades the answer for grounding and coverage. If it's not good enough, it writes a sharper query and the whole thing loops.
-
-A LangGraph state machine runs that loop and decides when to stop.
-
-## How the loop works
-
-The interesting part is the dashed arrow. The evaluator's verdict, not a fixed script, is what decides whether the system is done or goes around again.
+## How a question is answered
 
 ```mermaid
 flowchart LR
-    Q([Question]) --> R[Retriever]
-    R -->|top-k chunks| S[Summarizer]
-    S -->|cited answer| E[Evaluator]
-    E -->|good enough| C[Compose report]
-    E -.->|needs more| R
-    C --> OUT([Report])
-    R <--> VS[(FAISS index)]
+    Q([question]) --> R[retrieve]
+    R --> A[answer]
+    A -->|single pass| D([answer and cited passages])
+    A --> V[review]
+    V -->|sufficient| D
+    V -->|refined query| R
 ```
 
-The loop is capped by `MAX_ITERATIONS` (3 by default), so it always terminates. That cap plus a per-run limit on API calls is also what keeps a misbehaving evaluator from looping forever and running up a bill.
+1. Retrieve. The query is embedded with all-MiniLM-L6-v2, run through ONNX Runtime with the weights checked against their SHA-256, and the top 5 passages come from an exact cosine search over a numpy matrix. A paper is a few hundred passages, so the exact search takes milliseconds and an approximate index would only cost recall.
+2. Answer. The passages go to the model numbered [1] to [5], and the reply has to match a JSON schema: a short answer, the numbers of the passages that support it, and a flag for "the passages don't answer this". Passage numbers the model makes up are dropped.
+3. Review. A second call gets the question, the answer and the full text of the passages it cites, or of every passage it had when it declined. It says whether each part of the answer is supported and whether it answers the question, and if not, names what's missing and writes one search query to find it.
+4. That query retrieves again, new passages are merged with the ones already found, and the answer is redone from all of them.
 
-Step by step:
+A run ends one of five ways, and the result says which:
 
-1. Documents get split by a chunker that breaks on paragraph, then sentence, then word boundaries, with a bit of overlap so context isn't cut mid-thought. Each chunk is embedded and added to FAISS.
-2. For the current query, the retriever returns the top matches by cosine similarity. Across loops, new chunks are merged with what's already been found.
-3. The chunks get numbered and handed to Claude, which answers using only them and marks each claim with `[n]`. The JSON that comes back is validated with Pydantic.
-4. A second Claude call scores the answer. If it needs more and there's budget left, it hands back a refined query and the graph loops.
-5. Once the evaluator is satisfied (or the budget runs out), everything is rendered into a Markdown report: the summary, the extracted methods, key findings, and research gaps, plus the search trail and a numbered reference list.
+| Status | When |
+|---|---|
+| answered | the review accepted the answer, or found it lacking without a query to try; it's also how a single pass ends |
+| round cap | three rounds done |
+| no new passages | the refined query found only passages the last answer already had, so answering again would repeat it |
+| deadline | 120 seconds passed, checked before every model call |
+| budget | the next call could take spending past the cap, checked before every call |
 
-## Runs offline, no API key
+Model calls go through one small interface, `LLMClient`. OpenAI's Responses API is the default; another provider is one more class with a `complete` method. Retries on timeouts, rate limits and 5xx responses happen in my code rather than inside the SDK, so each retry shows up in the trace and the tests can count them. Every reply records the model ID the API reports, the tokens, the cost and the wall time, and every run carries a trace with each step's seconds and calls.
 
-Every piece has a fallback, so you can watch the full loop run with nothing configured:
+## How the loop is measured
 
-```bash
-pip install -e .
-python -m research_assistant demo
-```
+QASPER ([Dasigi et al., NAACL 2021](https://aclanthology.org/2021.naacl-main.365)) has 5,049 questions about 1,585 NLP papers. Annotators answered each question after reading the whole paper and marked the paragraphs their answer rests on, so a system is scored on what it cites as well as what it says. Some questions can't be answered from the paper, which tests whether a system declines instead of guessing.
 
-The demo runs offline. It swaps in a deterministic hashing embedding and a stub that fakes structured output from the retrieved text. That still exercises the real retrieval, the real graph, the real citation numbering, and the real report renderer. It just doesn't call the network. Add an `ANTHROPIC_API_KEY` and you get real Claude answers instead of the stub.
+- Each question is asked against its own paper, split into its paragraphs exactly as the dataset has them, so a cited paragraph matches the annotators' evidence character for character.
+- 150 questions are drawn with seed 0 from the dev split (1,005 questions on 281 papers) and 150 from the test split (1,451 on 416). Dev is for reading errors and changing things. Test runs once, after the last change.
+- Both systems use the same retrieval and the same models: gpt-6-luna answers and reviews with low reasoning effort, and gpt-6.1-sol grades. The loop's first round sends exactly the single pass's request, so its first answer is the single pass's answer, replayed rather than paid for twice, and any difference between the two comes from the review rounds.
+- Answer F1 and evidence F1 are the official metrics, ported from the evaluator in [allenai/qasper-led-baseline](https://github.com/allenai/qasper-led-baseline) (`scripts/evaluator.py` at `afd0fb9`): token F1 against each annotator, keeping the best, and evidence over text paragraphs only, since this system can't retrieve a figure or a table.
+- Token F1 scores a right answer low when it's worded differently from every annotator, so a judge model also grades each answer correct or incorrect against the annotators' answers. Exact matches skip the judge.
+- I grade 40 of the judged test answers myself without seeing the judge's verdicts, and the results report how often we agree and Cohen's kappa.
+- Differences between the systems are paired by question, with 95% intervals from 10,000 bootstrap resamples.
+- Each wrong answer gets the first stage that failed: evidence not retrieved, retrieved but not cited, cited but answered wrong, declined an answerable question, or answered an unanswerable one.
+- Spending is capped at $25 across everything recorded. Before each call the client prices the worst case, counting the prompt at a deliberately high one token per three characters plus the full output allowance, and refuses a call that could cross the cap.
 
-## Running it locally
+## Rerunning the numbers without a key
 
-Needs Python 3.9 or newer.
+Every model reply is recorded under a hash of its request in `results/qasper/calls.jsonl`, and every search and how each run stopped go to `results/qasper/runs.jsonl`. `research-assistant check-replay results/qasper-test.json` reruns the evaluation from those files with no API key and lists every answer, citation or score that comes out different. CI does this on every push once a recording is committed.
+
+The search log is there because MiniLM runs in float32. On another CPU a similarity can move in the sixth decimal place, which is enough to swap two nearly tied paragraphs, change the prompt and miss the recorded reply. A replay recomputes each search and keeps the logged ranking when every score agrees to within 1e-4. A bigger difference means retrieval itself changed, and the replay fails instead of answering from different passages.
+
+The replay doubles as a regression test: change a prompt, the top-k or the chunking and it fails, because the model would be asked something it wasn't. The unit tests replay recorded stub responses through the real graph, offline.
+
+## Running it
+
+Python 3.12 or newer.
 
 ```bash
 git clone https://github.com/bharathkumardev1/Agentic-Research-Assistant.git
 cd Agentic-Research-Assistant
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
+make install   # the hashed lock, then the package and the test tools
+make demo      # three sample papers, offline stub model, no key
 ```
 
-Point it at your own papers and ask something:
+The three papers in `examples/sample_papers` are short synthetic papers I wrote so the demo runs offline. The demo's answers say nothing about real research.
+
+For your own papers, put an OpenAI key in `.env` (copy `.env.example`):
 
 ```bash
-# Local files or folders (.pdf, .txt, .md), or pull from arXiv
-research-assistant ingest path/to/papers/
+research-assistant ingest path/to/papers/                     # PDF, text or Markdown
 research-assistant ingest --arxiv "retrieval augmented generation" --arxiv-max 8
-
-research-assistant research "What methods do these papers use for grounding, and what gaps remain?"
-research-assistant research "Compare their evaluation setups" -o report.md   # save to a file
-research-assistant research "Compare their evaluation setups" --json          # full structured result
+research-assistant research "Which datasets do these papers evaluate on?"
+research-assistant research "..." --max-rounds 1              # single pass
+research-assistant research "..." --json                      # everything, trace included
 ```
 
-For real Claude answers, put your key in a `.env` file (copy `.env.example`) and it gets picked up automatically.
-
-## Running the API
+The QASPER evaluation calls the API, and the cap stops it at $25:
 
 ```bash
-uvicorn research_assistant.webapp:app --reload
+make qasper      # dev and test sets, with the release tarballs' SHA-256 recorded
+make eval-dev    # 150 dev questions through both systems
+make eval-test   # 150 test questions, once
+make labels      # 40 judged answers for you to grade, in results/qasper/labels.csv
+make agreement   # the judge against your grades, written into the results
+make check-replay
 ```
 
-Endpoints:
+It runs one question at a time and prints a line per answer. An interrupted run picks up where it stopped: recorded replies replay for free and only the missing calls are made.
 
-- `GET /health` returns status and whether it's running in live or offline mode. No auth, so a load balancer can poll it.
-- `GET /metrics` exposes Prometheus metrics (request count by outcome, latency histogram). No auth.
-- `POST /research` runs the loop for a question.
-- `GET /docs` is the interactive Swagger page.
-
-If you set `WEB_API_KEY` (a single shared key) and/or `WEB_API_KEYS` (comma-separated `name:key` pairs for multiple named callers), `/research` requires that value in an `X-API-Key` header. Leave both unset and the endpoint is open (fine for a local demo, not for anything public).
+### API
 
 ```bash
-curl -X POST http://localhost:8000/research \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-key" \
-  -d '{"question": "What are the research gaps?"}'
+uvicorn research_assistant.webapp:app
+curl -X POST localhost:8000/research -H 'Content-Type: application/json' \
+  -d '{"question": "Which datasets do these papers evaluate on?"}'
 ```
 
-Two more things guard the endpoint against misuse:
-
-- **Rate limiting.** `RATE_LIMIT_PER_MINUTE` (default 20) caps requests per caller, bucketed by API key name or IP. It's in-memory and per-process, so it doesn't coordinate across multiple workers or replicas — see `src/research_assistant/rate_limit.py` for why, and what a real multi-instance limit would need (a shared store like Redis).
-- **Timeouts.** `REQUEST_TIMEOUT_SECONDS` (default 120) bounds how long a single request can hold the connection open; the caller gets a `504` instead of hanging indefinitely.
-
-Errors never leak internals: a failed run returns a generic message with a short reference id, and the full exception is logged server-side against that same id for debugging.
-
-## Configuration
-
-Everything reads from environment variables or a `.env` file. The ones you'll actually touch:
-
-| Variable | Default | What it does |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | (none) | Needed for real answers. Not needed for the offline demo. |
-| `WEB_API_KEY` | (none) | If set, `/research` requires it in the `X-API-Key` header. |
-| `WEB_API_KEYS` | (none) | Comma-separated `name:key` pairs for multiple named callers, e.g. `alice:sk-a,bob:sk-b`. |
-| `RATE_LIMIT_PER_MINUTE` | `20` | Max `/research` calls per minute per caller. `0` disables it. |
-| `REQUEST_TIMEOUT_SECONDS` | `120` | Hard cap on a single `/research` call before it returns `504`. |
-| `CORS_ORIGINS` | `*` | Comma-separated allowed browser origins for the web service, or `*` for any. |
-| `SUMMARIZER_MODEL` | `claude-sonnet-4-6` | Model for the answer. |
-| `EVALUATOR_MODEL` | `claude-opus-4-8` | Model for the critique. |
-| `MAX_API_CALLS` | `40` | Hard ceiling on Claude calls per run. A cost guard. |
-| `MAX_ITERATIONS` | `3` | Cap on retrieve/summarize/evaluate cycles. |
-| `EMBEDDING_BACKEND` | `sentence-transformers` | Or `hashing` for a dependency-free offline embedder. |
-| `TOP_K` | `6` | Chunks retrieved per query. |
-| `INDEX_DIR` | `data/index` | Where a real ingested index is saved/loaded from. Point it at a persistent volume for a corpus that survives redeploys. |
-| `LOG_LEVEL` | `INFO` | `DEBUG` for the play-by-play. |
-
-## Deploying it
-
-There's a `Dockerfile` and a `render.yaml`. To run it in a container:
+`POST /research` returns the answer, the cited passages, the reviews and the trace. `GET /health` says whether answers come from the model or the offline stub, `GET /metrics` serves Prometheus counters and a latency histogram, and `/docs` is the generated API page. Setting `WEB_API_KEY`, or `WEB_API_KEYS` as `name:key` pairs, makes `/research` require an `X-API-Key` header. `RATE_LIMIT_PER_MINUTE` limits each caller, in memory and per process, so with several workers each one counts separately. `REQUEST_TIMEOUT_SECONDS` turns a slow run into a 504, and a failed run returns a short reference id while the traceback goes to the log under the same id.
 
 ```bash
 docker build -t research-assistant .
 docker run --rm -p 8000:8000 research-assistant
 ```
 
-The live demo above is this image on Render's free tier, deployed straight from the `render.yaml` blueprint. Connect the repo on Render and it picks up the config on its own. Set `ANTHROPIC_API_KEY` and `WEB_API_KEY` in the dashboard (they're marked as secrets, so they never live in the repo).
+With no key and nothing mounted, the image serves the sample papers with the offline stub, which is what CI's smoke test runs. The Dockerfile's header has the command for real answers with mounted weights and an index. The base image is pinned by digest and dependencies install from `requirements.lock` with hashes.
 
-For a real corpus, mount a persistent volume at `INDEX_DIR`, run `research-assistant ingest ...` against it once, and the web service loads that index on startup instead of the bundled demo papers on every restart.
+## Configuration
 
-To run more than one worker (each holds its own copy of the index in memory), set `WEB_CONCURRENCY`. Render's free plan is single-CPU so it defaults to `1`; on a bigger plan, raise it. One caveat: rate limiting is in-memory per worker, so the effective `/research` limit multiplies by `WEB_CONCURRENCY` — fine for a single box, not a substitute for a shared limiter if you're running multiple replicas.
+Environment variables or `.env`:
 
-A scheduled GitHub Actions workflow (`.github/workflows/keepalive.yml`) pings `/health` every 10 minutes to stop the free-tier instance from idling to sleep. It's a mitigation, not a fix — the free plan still caps monthly instance hours and has no uptime SLA; a paid plan removes that constraint outright.
+| Variable | Default | |
+|---|---|---|
+| `OPENAI_API_KEY` | | needed for real answers and the evaluation |
+| `ANSWER_MODEL`, `REVIEW_MODEL` | `gpt-6-luna` | |
+| `JUDGE_MODEL` | `gpt-6.1-sol` | grades answers in the evaluation |
+| `REASONING_EFFORT` | `low` | |
+| `TOP_K` | `5` | passages per search |
+| `MAX_ROUNDS` | `3` | 1 is the single pass |
+| `RUN_DEADLINE_SECONDS` | `120` | checked before every model call |
+| `RUN_BUDGET_USD` | `0.50` | spending cap for one `research` question; the evaluation uses `--cap` |
+| `CALL_TIMEOUT_SECONDS`, `CALL_ATTEMPTS` | `60`, `3` | per attempt; retries on timeouts, 429 and 5xx |
+| `EMBEDDING_BACKEND` | `minilm` | or `hashing`, which needs no download |
+| `INDEX_DIR` | `data/index` | |
 
-## Frontend
+The web service's settings are in `.env.example`.
 
-`frontend/` is a small Vite + React app that gives the pipeline a UI: a question box, a three-stage agent rail (retrieve → draft → check), and the answer rendered with clickable `[n]` citation chips next to their source passages.
+## Limits
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+- QASPER papers are all NLP, and the evaluation searches each question's own paper. With many papers in one index, which `research` allows, retrieval has more ways to go wrong than this measures.
+- Figures and tables aren't indexed. Questions whose evidence is a table are scored on text evidence only and are harder to answer.
+- With 150 test questions, the 95% interval on judged accuracy is 7 to 8 points either side, so a small difference between the systems will show up as a tie.
+- The judge is a model. Forty hand-graded answers say how far to trust it, not that it's right on the rest.
+- Prices in `llm.py` are copied from OpenAI's pricing page on 2026-10-21. If they change, the recorded dollars go stale and `check-replay` flags it.
 
-By default it runs entirely on baked-in demo data, no backend required. To point it at a real deployment, copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_URL` (plus `VITE_API_KEY` if the backend has `WEB_API_KEY` set). The header pill and footer switch to "live api" once that's configured. The backend needs `CORS_ORIGINS` set to allow the frontend's origin (defaults to `*`, fine for a demo).
-
-## Tests
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-58 tests covering the chunker, schema validation, citation alignment, the hashing embedder, the FAISS store, JSON extraction and the stub client, a full offline end-to-end run through the real graph, and the web endpoints (health, auth, rate limiting, timeouts, error handling, metrics, and a real pipeline call). Tests that need `faiss-cpu` or `langgraph` skip themselves if those aren't installed, so a minimal setup still passes. CI runs the whole thing on Python 3.9, 3.11, and 3.12.
-
-## What this is, and what it isn't
-
-I want to be straight about scope, because "agentic AI" gets oversold constantly.
-
-The sample papers under `examples/sample_papers/` are synthetic. I wrote them so the demo has something to run against offline. The numbers in any sample output come from those made-up papers, not real research. The architecture, the retrieval, the citation grounding, and the agent loop are all real and run against live Claude the moment you add a key and point it at actual PDFs or an arXiv query.
-
-The web service has the hardening a public endpoint needs: per-caller rate limiting, enforced request timeouts, sanitized error responses (no internal exception text reaches the client), scoped API keys, Prometheus metrics at `/metrics`, pinned dependency versions for reproducible builds, and a persisted index that survives redeploys when you mount a volume.
-
-What it still isn't is a multi-tenant production system, and I wouldn't call it one. There's no database (the FAISS index is a file), no per-user accounts or usage billing, no distributed rate limiting or shared cache across replicas (both are in-memory per process — see `rate_limit.py`), and no request tracing beyond structured logs. The free host it's deployed on has no uptime SLA. Turning this into something people depend on at scale would mean adding most of that. What's here is a solid single-instance service: tested, containerized, logged, metriced, and reachable at a URL.
-
-## Project layout
+## Layout
 
 ```
 src/research_assistant/
-  config.py         settings from env / .env
-  schemas.py        Pydantic models used everywhere
-  llm.py            Claude client (with retries + cost cap) and the offline stub
-  webapp.py         FastAPI service
-  rate_limit.py     in-process per-caller rate limiter
-  cli.py            the research-assistant command
-  logging_utils.py  structured logging with a per-run id
-  ingestion/        loaders (pdf/text/md/arxiv) and the chunker
-  rag/              embeddings and the FAISS store
-  agents/           retriever, summarizer, evaluator
-  graph/            the LangGraph loop
+  graph/workflow.py   the loop as a LangGraph graph, and how a run stops
+  agents/             retrieve, answer, review
+  llm.py              the client interface, OpenAI client, offline stub, recorder, budget, retries
+  trace.py            per-step seconds, tokens and cost
+  rag/                MiniLM through ONNX Runtime, exact numpy search
+  ingestion/          PDF, text and arXiv loaders, chunking
+  eval/               QASPER loader and metrics, the evaluation, run log, replay export
+  webapp.py           the HTTP API
+  cli.py              the research-assistant command
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
