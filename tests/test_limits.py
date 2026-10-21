@@ -19,8 +19,14 @@ PASSAGES = [Chunk(chunk_id=f"p::{i}", paper_id="p", title="Paper", text=f"Passag
 
 
 class Store:
+    """Each search brings one passage the run hasn't seen, unless ``same`` is set."""
+
+    def __init__(self, same=False):
+        self.same, self.searches = same, 0
+
     def search(self, query, k=5):
-        start = len(query) % 3  # a different query brings different passages
+        start = 0 if self.same else self.searches
+        self.searches += 1
         return [RetrievedChunk(chunk=c, score=1.0 - i / 10) for i, c in enumerate(PASSAGES[start:start + k])]
 
 
@@ -43,8 +49,8 @@ class Model:
         return Reply(json.dumps(out), "gpt-6-luna", input_tokens=100, output_tokens=20, attempts=self.attempts)
 
 
-def pipeline(model, max_rounds=3, deadline=None):
-    return ResearchPipeline(RetrieverAgent(Store(), top_k=3), AnswerAgent(model, "gpt-6-luna"),
+def pipeline(model, max_rounds=3, deadline=None, store=None):
+    return ResearchPipeline(RetrieverAgent(store or Store(), top_k=3), AnswerAgent(model, "gpt-6-luna"),
                             EvaluatorAgent(model, "gpt-6-luna"), max_rounds=max_rounds, deadline_seconds=deadline)
 
 
@@ -53,6 +59,13 @@ def test_the_round_cap_stops_a_reviewer_that_is_never_satisfied():
     result = pipeline(model, max_rounds=3).run("What share?")
     assert result.status == "round cap" and result.rounds == 3
     assert model.calls == ["answer", "review"] * 3 and result.answer.answer == "10%"
+
+
+def test_a_refined_query_that_finds_nothing_new_ends_the_loop():
+    model = Model(satisfied=False)
+    result = pipeline(model, store=Store(same=True)).run("What share?")
+    assert result.status == "no new passages" and result.rounds == 1
+    assert model.calls == ["answer", "review"]  # answering again from the same passages would repeat itself
 
 
 def test_a_satisfied_reviewer_ends_the_loop_early():
