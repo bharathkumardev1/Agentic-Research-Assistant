@@ -32,6 +32,15 @@ jobs:
       - name: Type check with mypy
         run: mypy
 
+      # The MiniLM test compares against recorded vectors, so CI needs the real weights.
+      - uses: actions/cache@v6
+        with:
+          path: models/all-MiniLM-L6-v2
+          key: minilm-l6-v2-6fd5d72f
+
+      - name: MiniLM weights, checked against their SHA-256
+        run: python -c "from research_assistant.rag.embeddings import download_minilm as d; d('models/all-MiniLM-L6-v2')"
+
       - name: Run tests
         run: pytest -q
 
