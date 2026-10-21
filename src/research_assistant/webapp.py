@@ -1,33 +1,20 @@
-"""A minimal FastAPI web service around the research pipeline.
+"""The research pipeline behind a small HTTP API; the Docker image runs this.
 
-Run locally with:
     uvicorn research_assistant.webapp:app --reload
 
-This is what the Docker image runs. On
-startup it looks for a previously ``ingest``-ed index at ``INDEX_DIR``
-(e.g. a mounted persistent volume) and loads that if present. Otherwise it
-falls back to building a fast, offline demo index from the bundled sample
-papers, so the service is demoable immediately after deploy with zero
-configuration. Either way, if ``OPENAI_API_KEY`` is set, questions are
-answered by the configured model; otherwise the offline stub is used.
+On startup it loads the index at ``INDEX_DIR`` if one was built with ``ingest``; otherwise
+it indexes the three sample papers with hashing embeddings. Answers come from the model when
+``OPENAI_API_KEY`` is set and from the offline stub when it isn't; ``/health`` says which.
 
-Endpoints
----------
-GET  /health              -> liveness/readiness check, no auth required
-GET  /metrics             -> Prometheus metrics, no auth required
-POST /research            -> run the agentic loop for a question
+GET  /health     liveness, no auth
+GET  /metrics    Prometheus counters and latency histogram, no auth
+POST /research   one question through the loop; returns the answer, citations and trace
 
-Production-hardening notes
----------------------------
-- Auth: set ``WEB_API_KEY`` and/or ``WEB_API_KEYS`` (see config.py) to
-  require an ``X-API-Key`` header on ``/research``.
-- Rate limiting: ``RATE_LIMIT_PER_MINUTE`` caps requests per caller. It's
-  in-memory and per-process -- see ``rate_limit.py`` for the multi-worker
-  caveat.
-- Timeouts: ``REQUEST_TIMEOUT_SECONDS`` bounds how long a single request can
-  hold the connection open before the caller gets a 504.
-- Errors: callers never see raw exception text, only a short reference id
-  that's paired with the full traceback in the server logs.
+Set ``WEB_API_KEY`` or ``WEB_API_KEYS`` to require an ``X-API-Key`` header on /research.
+``RATE_LIMIT_PER_MINUTE`` limits each caller, in memory and per process (see rate_limit.py
+for what that means with several workers). ``REQUEST_TIMEOUT_SECONDS`` returns a 504 when a
+run takes too long. A failed run returns a short reference id, and the traceback goes to the
+log under the same id, never to the caller.
 """
 
 from __future__ import annotations
@@ -171,24 +158,24 @@ class ResearchRequest(BaseModel):
 
 @app.get("/")
 def root() -> RedirectResponse:
-    """Redirect the bare URL to the interactive API docs, purely cosmetic."""
+    """The bare URL goes to the interactive API docs."""
     return RedirectResponse(url="/docs")
 
 @app.get("/health")
 def health() -> dict:
-    """Liveness/readiness probe. No auth required so load balancers can call it freely."""
+    """No auth, so a load balancer can poll it."""
     return {"status": "ok", "mode": _state.get("mode", "unknown")}
 
 
 @app.get("/metrics")
 def metrics() -> Response:
-    """Prometheus scrape endpoint. No auth; put it behind a private network/route if needed."""
+    """No auth; keep it on a private network if that matters."""
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/research")
 def research(payload: ResearchRequest, client_id: str = Depends(_require_api_key)) -> dict:
-    """Run the agentic research loop for a question and return the structured result."""
+    """One question through the loop: answer, cited passages, reviews and trace."""
     settings = get_settings()
     if not _rate_limiter.allow(client_id, settings.rate_limit_per_minute):
         REQUEST_COUNT.labels(status="rate_limited").inc()
