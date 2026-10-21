@@ -66,7 +66,7 @@ class FaissVectorStore:
         query_vec = self.embeddings.embed([query])
         scores, indices = self.index.search(query_vec, k)
         results: List[RetrievedChunk] = []
-        for score, idx in zip(scores[0], indices[0]):
+        for score, idx in zip(scores[0], indices[0], strict=True):
             if idx < 0:
                 continue
             results.append(

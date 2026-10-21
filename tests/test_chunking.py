@@ -1,5 +1,7 @@
 """Tests for the boundary-aware chunker."""
 
+from itertools import pairwise
+
 from research_assistant.ingestion.chunking import chunk_paper, chunk_text
 from research_assistant.schemas import PaperMetadata
 
@@ -34,7 +36,7 @@ def test_consecutive_chunks_share_overlap_context():
     assert len(chunks) >= 2
     # At least one boundary should share a token between neighbours.
     shared = False
-    for a, b in zip(chunks, chunks[1:]):
+    for a, b in pairwise(chunks):
         tail = set(a.split()[-5:])
         head = set(b.split()[:5])
         if tail & head:
