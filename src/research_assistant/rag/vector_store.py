@@ -43,11 +43,15 @@ class VectorStore:
         self.vectors = np.vstack([self.vectors, vectors.astype(np.float32)])
         self.chunks.extend(chunks)
 
+    def similarities(self, query: str) -> np.ndarray:
+        """Cosine similarity of ``query`` to every passage, in passage order."""
+        return self.vectors @ self.embeddings.embed([query])[0]
+
     def search(self, query: str, k: int = 5) -> List[RetrievedChunk]:
         """The ``k`` passages most similar to ``query``, best first; ties go to the earlier passage."""
         if self.is_empty:
             return []
-        scores = self.vectors @ self.embeddings.embed([query])[0]
+        scores = self.similarities(query)
         k = min(k, len(scores))
         top = np.argpartition(-scores, k - 1)[:k]
         top = top[np.lexsort((top, -scores[top]))]

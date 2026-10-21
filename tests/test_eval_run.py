@@ -10,16 +10,25 @@ pytest.importorskip("langgraph", reason="langgraph not installed")
 
 from research_assistant.cli import main  # noqa: E402
 from research_assistant.eval import qasper as Q  # noqa: E402
-from research_assistant.eval.run import agreement, failure, label_sheet, run, sample  # noqa: E402
+from research_assistant.eval.run import agreement, differences, failure, label_sheet, run, sample  # noqa: E402
+from research_assistant.eval.runlog import RunLog, stop_key  # noqa: E402
 from research_assistant.llm import BudgetExceeded, Recorder, StubClient  # noqa: E402
 from research_assistant.rag.embeddings import HashingEmbeddings  # noqa: E402
 
 MINI = Path(__file__).parent / "fixtures" / "qasper_mini.json"
 
 
-def evaluate(client):
+def evaluate(client, log=None):
     papers = Q.load(MINI)
-    return run(papers, sample(papers, None), client, HashingEmbeddings(256), "stub", "stub", "stub", top_k=2)
+    return run(papers, sample(papers, None), client, HashingEmbeddings(256), "stub", "stub", "stub", top_k=2,
+               log=log)
+
+
+def stub_meta(res):
+    res["meta"] = {"command": "research-assistant eval", "git_sha": "0" * 40, "date": "2026-10-21",
+                   "answer_model": "stub", "review_model": "stub", "judge_model": "stub"}
+    res["split"] = "dev"
+    return res
 
 
 def test_every_question_is_scored_for_both_systems(tmp_path):
@@ -90,20 +99,51 @@ def test_eval_command_records_and_replays(tmp_path, monkeypatch):
     (data / Q.FILES["dev"]).write_text(MINI.read_text())
     monkeypatch.setenv("EMBEDDING_BACKEND", "hashing")
     monkeypatch.setenv("OPENAI_API_KEY", "")
-    record = tmp_path / "calls.jsonl"
+    record, log, out = tmp_path / "calls.jsonl", tmp_path / "runs.jsonl", tmp_path / "qasper-dev.json"
+    files = ["--data-dir", str(data), "--record", str(record), "--log", str(log)]
     Recorder(record)  # nothing recorded yet, so a replay must fail
-    assert main(["eval", "--data-dir", str(data), "--record", str(record), "--replay",
-                 "--out", str(tmp_path / "qasper-dev.json")]) == 1
-    rec = Recorder(record, StubClient())
+    assert main(["eval", *files, "--replay", "--out", str(out)]) == 1
     papers = Q.load(data / Q.FILES["dev"])
     from research_assistant.config import get_settings
 
     get_settings.cache_clear()
     s = get_settings()
-    run(papers, sample(papers, 150, 0), rec, HashingEmbeddings(s.hashing_dim), s.answer_model, s.review_model,
-        s.judge_model, s.top_k, s.run_deadline_seconds, s.reasoning_effort)
-    assert main(["eval", "--data-dir", str(data), "--record", str(record), "--replay",
-                 "--out", str(tmp_path / "qasper-dev.json")]) == 0
-    res = json.loads((tmp_path / "qasper-dev.json").read_text())
+    run(papers, sample(papers, 150, 0), Recorder(record, StubClient()), HashingEmbeddings(s.hashing_dim),
+        s.answer_model, s.review_model, s.judge_model, s.top_k, s.run_deadline_seconds, s.reasoning_effort,
+        log=RunLog(log))
+    logged = log.read_text()
+    assert main(["eval", *files, "--replay", "--out", str(out)]) == 0
+    assert log.read_text() == logged  # a replay reads the log and doesn't add to it
+    res = json.loads(out.read_text())
     assert res["calls"]["made"] == 0 and res["questions"] == 3
     assert "## QASPER dev: 3 questions" in (tmp_path / "RESULTS.md").read_text()
+
+    # check-replay reruns the results file from the recording and compares every score.
+    assert main(["check-replay", str(out), *files]) == 0
+    res["rows"][0]["answer_f1"] += 0.5
+    out.write_text(json.dumps(res))
+    assert main(["check-replay", str(out), *files]) == 1
+
+
+def test_differences_ignore_wall_time_and_nothing_else(tmp_path):
+    res = stub_meta(evaluate(Recorder(tmp_path / "calls.jsonl", StubClient())))
+    again = json.loads(json.dumps(res))
+    for r in again["rows"]:
+        r["seconds"] += 3.0
+    assert differences(res, again) == []
+    again["rows"][2]["verdict"] = "incorrect"
+    assert len(differences(res, again)) == 1
+    again["meta"]["qasper_tarballs_sha256"] = {"test": "f" * 64}
+    res["meta"]["qasper_tarballs_sha256"] = {"test": "0" * 64}
+    assert any("tarballs" in d for d in differences(res, again))
+
+
+def test_a_deadline_stop_replays_as_a_deadline(tmp_path):
+    record, log = tmp_path / "calls.jsonl", RunLog(tmp_path / "runs.jsonl")
+    first = evaluate(Recorder(record, StubClient()), log)
+    loop = next(r for r in first["rows"] if r["system"] == "loop")
+    # As if the clock had run out after the first answer, before the first review.
+    log.stops[stop_key(loop["question_id"], "loop")] = {"status": "deadline", "calls": 1}
+    again = evaluate(Recorder(record), log)
+    replayed = next(r for r in again["rows"] if r["question_id"] == loop["question_id"] and r["system"] == "loop")
+    assert replayed["status"] == "deadline" and replayed["calls"] == 1 and replayed["rounds"] == 1

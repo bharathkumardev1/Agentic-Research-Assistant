@@ -3,6 +3,7 @@
 * ``ingest``    index papers from files or an arXiv search
 * ``research``  answer a question from the index, with cited passages
 * ``demo``      index the bundled sample papers and answer a sample question (offline unless --live)
+* ``qasper-download``, ``eval``, ``check-replay``, ``label-judge``, ``judge-agreement``  the QASPER evaluation
 
 Heavy imports happen inside each command, so ``--help`` is instant and a command never
 needs another command's dependencies.
@@ -116,6 +117,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     from .eval import qasper as Q
     from .eval.report import meta, write_markdown
     from .eval.run import run, sample
+    from .eval.runlog import RunLog
     from .llm import Budget, OpenAIClient, Recorder
     from .rag.embeddings import get_embeddings
 
@@ -123,6 +125,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     papers = Q.load(Path(args.data_dir) / Q.FILES[args.split])
     questions = sample(papers, args.sample, args.seed)
     recorder = Recorder(Path(args.record))
+    log = RunLog(Path(args.log), write=not args.replay)
     budget = Budget(args.cap, spent_usd=recorder.recorded_spend_usd)
     if not args.replay:
         recorder.client = OpenAIClient(settings.require_api_key(), settings.call_timeout_seconds,
@@ -135,12 +138,12 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
     res = run(papers, questions, recorder, embeddings, settings.answer_model, settings.review_model,
               settings.judge_model, settings.top_k, settings.run_deadline_seconds, settings.reasoning_effort or None,
-              on_row=progress)
+              on_row=progress, log=log)
     res = {"meta": meta(args.command_line, settings, embeddings, Path(args.data_dir)), "split": args.split,
            "sample": args.sample, "seed": args.seed, "questions": len(questions),
            "calls": {"made": recorder.made, "replayed": recorder.replayed},
            "recorded_spend_usd": round(budget.spent_usd, 6), "cap_usd": args.cap, **res}
-    out = Path(args.out)
+    out = Path(args.out or f"results/qasper-{args.split}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=1) + "\n")
     write_markdown(out.parent, out.parent / "RESULTS.md")
@@ -150,6 +153,42 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     if res["stopped"]:
         print(f"stopped early: {res['stopped']}", file=sys.stderr)
         return 2
+    return 0
+
+
+def _cmd_check_replay(args: argparse.Namespace) -> int:
+    import json
+
+    from .eval import qasper as Q
+    from .eval.report import meta
+    from .eval.run import differences, run, sample
+    from .eval.runlog import RunLog
+    from .llm import Recorder
+    from .rag.embeddings import get_embeddings
+
+    expected = json.loads(Path(args.results).read_text())
+    m = expected["meta"]
+    settings = _settings(None, m["top_k"], None).model_copy(update={
+        "answer_model": m["answer_model"], "review_model": m["review_model"], "judge_model": m["judge_model"],
+        "reasoning_effort": m["reasoning_effort"]})
+    embeddings = get_embeddings(settings.embedding_backend, settings.embedding_model_dir, settings.hashing_dim)
+    if embeddings.name != m["embeddings"]:
+        print(f"{args.results} was made with {m['embeddings']} embeddings, not {embeddings.name}; "
+              f"set EMBEDDING_BACKEND to match", file=sys.stderr)
+        return 1
+    papers = Q.load(Path(args.data_dir) / Q.FILES[expected["split"]])
+    only = {(r["question_id"], r["system"]) for r in expected["rows"]}
+    res = run(papers, sample(papers, expected["sample"], expected["seed"]), Recorder(Path(args.record)), embeddings,
+              m["answer_model"], m["review_model"], m["judge_model"], m["top_k"], m["deadline_seconds"],
+              m["reasoning_effort"] or None, log=RunLog(Path(args.log), write=False), only=only)
+    res["meta"] = meta(args.command_line, settings, embeddings, Path(args.data_dir))
+    diffs = differences(expected, res)
+    for line in diffs[:50]:
+        print(line, file=sys.stderr)
+    if diffs:
+        print(f"{len(diffs)} difference(s) from {args.results}", file=sys.stderr)
+        return 1
+    print(f"{args.results}: {len(res['rows'])} answers replayed with no key; every score matches")
     return 0
 
 
@@ -224,11 +263,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--data-dir", default="data/qasper")
     p.add_argument("--top-k", type=int)
-    p.add_argument("--record", default="results/qasper/calls.jsonl")
+    p.add_argument("--record", default="results/qasper/calls.jsonl", help="model replies")
+    p.add_argument("--log", default="results/qasper/runs.jsonl", help="searches and how each run stopped")
     p.add_argument("--replay", action="store_true", help="recorded replies only; no API key needed")
     p.add_argument("--cap", type=float, default=25.0, help="USD, over everything in the recording")
-    p.add_argument("--out", default="results/qasper-dev.json")
+    p.add_argument("--out", help="default results/qasper-<split>.json")
     p.set_defaults(func=_cmd_eval)
+
+    p = sub.add_parser("check-replay", help="rerun a results file from its recording and compare, no key needed")
+    p.add_argument("results", help="e.g. results/qasper-test.json")
+    p.add_argument("--data-dir", default="data/qasper")
+    p.add_argument("--record", default="results/qasper/calls.jsonl")
+    p.add_argument("--log", default="results/qasper/runs.jsonl")
+    p.set_defaults(func=_cmd_check_replay)
 
     p = sub.add_parser("label-judge", help="sample judged answers for a person to grade")
     p.add_argument("--results", default="results/qasper-test.json")
