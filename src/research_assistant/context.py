@@ -17,9 +17,9 @@ def number_sources(retrieved: List[RetrievedChunk]) -> Tuple[str, List[SourceRef
     sources: List[SourceRef] = []
     for marker, item in enumerate(retrieved, start=1):
         chunk = item.chunk
-        where = chunk.section or chunk.title
-        lines.append(f"[{marker}] ({where})\n{' '.join(chunk.text.split())}")
+        text = " ".join(chunk.text.split())
+        lines.append(f"[{marker}] ({chunk.section or chunk.title})\n{text}")
         sources.append(SourceRef(marker=marker, paper_id=chunk.paper_id, title=chunk.title,
                                  chunk_id=chunk.chunk_id, section=chunk.section,
-                                 preview=chunk.short(180)))
+                                 preview=chunk.short(180), text=text))
     return "\n\n".join(lines), sources
