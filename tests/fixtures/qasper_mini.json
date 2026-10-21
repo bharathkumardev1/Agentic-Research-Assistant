@@ -1,0 +1,35 @@
+{
+  "synth.0001": {
+    "title": "A Synthetic Paper About Grounded Answers",
+    "abstract": "Invented for tests; every sentence here is made up.",
+    "full_text": [
+      {"section_name": "Introduction", "paragraphs": [
+        "We study answering questions about papers with cited passages.",
+        "Our system retrieves five passages per question."]},
+      {"section_name": "Results", "paragraphs": [
+        "The loop improved answer F1 by 4 points over a single pass.",
+        "On unanswerable questions it declined 61% of the time."]}
+    ],
+    "qas": [
+      {"question": "How many passages are retrieved per question?", "question_id": "q1",
+       "answers": [
+         {"answer": {"unanswerable": false, "extractive_spans": ["five passages"], "yes_no": null,
+                     "free_form_answer": "", "evidence": ["Our system retrieves five passages per question."],
+                     "highlighted_evidence": []}, "annotation_id": "a1", "worker_id": "w1"},
+         {"answer": {"unanswerable": false, "extractive_spans": [], "yes_no": null, "free_form_answer": "5",
+                     "evidence": ["Our system retrieves five passages per question.",
+                                  "FLOAT SELECTED: Table 1: Settings"],
+                     "highlighted_evidence": []}, "annotation_id": "a2", "worker_id": "w2"}]},
+      {"question": "Did the loop beat a single pass?", "question_id": "q2",
+       "answers": [
+         {"answer": {"unanswerable": false, "extractive_spans": [], "yes_no": true, "free_form_answer": "",
+                     "evidence": ["The loop improved answer F1 by 4 points over a single pass."],
+                     "highlighted_evidence": []}, "annotation_id": "a3", "worker_id": "w1"}]},
+      {"question": "Which GPU did they use?", "question_id": "q3",
+       "answers": [
+         {"answer": {"unanswerable": true, "extractive_spans": [], "yes_no": null, "free_form_answer": "",
+                     "evidence": [], "highlighted_evidence": []}, "annotation_id": "a4", "worker_id": "w1"}]}
+    ],
+    "figures_and_tables": []
+  }
+}

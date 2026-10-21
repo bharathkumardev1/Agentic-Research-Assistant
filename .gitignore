@@ -24,7 +24,8 @@ env/
 data/index/
 data/index_demo/
 data/raw/
-models/
+/models
+data/qasper/
 
 # OS / editor
 .DS_Store
