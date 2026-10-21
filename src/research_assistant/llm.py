@@ -198,22 +198,30 @@ class OpenAIClient:
 
 class StubClient:
     """Offline stand-in. Answers from the numbered passages in the prompt, cites the first
-    two, and asks for one more round the first time it's asked to evaluate, so the loop runs
-    end to end with no key and no network."""
+    two, asks for one more round the first time it reviews each question, and marks every
+    graded answer correct, so the loop and the evaluation run end to end with no key and no
+    network."""
 
     model = "stub"
 
     def __init__(self) -> None:
-        self.evaluations = 0
+        self.reviewed: set[str] = set()
 
     def complete(self, request: Request) -> Reply:
         system = request.system.lower()
+        if "you grade" in system:
+            verdict = {"verdict": "correct", "reason": "[dry-run] not graded"}
+            return Reply(text=json.dumps(verdict), model=self.model, input_tokens=len(request.prompt) // 4,
+                         output_tokens=10)
         if "review" in system:
-            self.evaluations += 1
+            question = re.search(r"^Question: (.*)$", request.prompt, flags=re.M)
+            key = question.group(1) if question else ""
+            first_review = key not in self.reviewed
+            self.reviewed.add(key)
             out: Dict[str, Any] = (
                 {"sufficient": False, "grounded": True, "missing": "the exact figure",
                  "refined_query": "reported results and numbers"}
-                if self.evaluations == 1 else
+                if first_review else
                 {"sufficient": True, "grounded": True, "missing": "", "refined_query": ""})
         else:
             passages = re.findall(r"^\[(\d+)\][^\n]*\n(.+)$", request.prompt, flags=re.M)
