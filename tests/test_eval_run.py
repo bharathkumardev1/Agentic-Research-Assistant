@@ -68,14 +68,16 @@ def test_running_out_of_budget_keeps_what_finished():
 
 
 def test_failures_follow_the_pipeline():
-    base = {"gold_unanswerable": False, "declined": False, "gold_retrieved": True, "gold_cited": True,
-            "verdict": "correct"}
-    assert failure(base) == "correct"
-    assert failure({**base, "verdict": "incorrect"}) == "cited the evidence, answer wrong"
-    assert failure({**base, "gold_cited": False}) == "evidence retrieved, not cited"
-    assert failure({**base, "gold_retrieved": False, "gold_cited": False}) == "evidence not retrieved"
-    assert failure({**base, "declined": True}) == "declined an answerable question"
-    assert failure({**base, "gold_unanswerable": True}) == "answered an unanswerable question"
+    wrong = {"gold_unanswerable": False, "declined": False, "gold_retrieved": True, "gold_cited": True,
+             "verdict": "incorrect"}
+    assert failure(wrong) == "cited the evidence, answer wrong"
+    assert failure({**wrong, "gold_cited": False}) == "evidence retrieved, not cited"
+    assert failure({**wrong, "gold_retrieved": False, "gold_cited": False}) == "evidence not retrieved"
+    assert failure({**wrong, "declined": True}) == "declined an answerable question"
+    assert failure({**wrong, "gold_unanswerable": True}) == "answered an unanswerable question"
+    assert failure({**wrong, "verdict": "correct", "gold_cited": False}) == "correct"
+    # One annotator said unanswerable and another answered: declining matches the first.
+    assert failure({**wrong, "verdict": "correct", "declined": True}) == "correct"
 
 
 def test_label_sheet_and_agreement(tmp_path):
