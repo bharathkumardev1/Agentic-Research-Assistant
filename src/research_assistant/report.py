@@ -1,77 +1,23 @@
-"""Render a completed research run as a Markdown report."""
+"""A finished run as Markdown: the answer, the passages it cites, and how it got there."""
 
 from __future__ import annotations
 
-from typing import List, Optional
-
-from .schemas import Evaluation, PaperSummary, SourceRef
+from .schemas import ResearchResult
 
 
-def _bullets(items: List[str], empty: str) -> str:
-    if not items:
-        return f"_{empty}_"
-    return "\n".join(f"- {item}" for item in items)
-
-
-def render_report(
-    question: str,
-    summary: PaperSummary,
-    sources: List[SourceRef],
-    evaluation: Optional[Evaluation] = None,
-    queries: Optional[List[str]] = None,
-) -> str:
-    """Produce a self-contained Markdown report for the run."""
-    queries = queries or []
-
-    references = (
-        "\n".join(
-            f"{s.marker}. **{s.title}**"
-            + (f" — `{s.source}`" if s.source else "")
-            + f"\n   > {s.preview}"
-            for s in sources
-        )
-        or "_No sources were cited._"
-    )
-
-    eval_block = ""
-    if evaluation is not None:
-        eval_block = (
-            "\n## Evaluation\n\n"
-            f"- **Sufficiency:** {evaluation.sufficiency}\n"
-            f"- **Coverage score:** {evaluation.coverage_score:.2f}\n"
-            f"- **Grounded:** {'yes' if evaluation.grounded else 'no'}\n"
-            f"- **Reviewer note:** {evaluation.critique or '—'}\n"
-        )
-        if evaluation.missing_aspects:
-            eval_block += "- **Still missing:** " + ", ".join(evaluation.missing_aspects) + "\n"
-
-    trail = ""
-    if queries:
-        trail = "\n## Search trail\n\n" + "\n".join(
-            f"{i}. `{q}`" for i, q in enumerate(queries, start=1)
-        ) + "\n"
-
-    return f"""# Research synthesis
-
-**Question:** {question}
-
-## Summary
-
-{summary.summary}
-
-## Methods
-
-{_bullets(summary.methods, "No methods were extracted.")}
-
-## Key findings
-
-{_bullets(summary.key_findings, "No key findings were extracted.")}
-
-## Research gaps
-
-{_bullets(summary.research_gaps, "No research gaps were identified.")}
-{eval_block}{trail}
-## References
-
-{references}
-"""
+def render_report(result: ResearchResult) -> str:
+    a = result.answer
+    answer = "The passages retrieved don't answer this." if a.unanswerable else a.answer
+    if a.evidence and not a.unanswerable:
+        answer += " " + "".join(f"[{m}]" for m in a.evidence)
+    cited = "\n".join(f"{s.marker}. {s.title}" + (f", {s.section}" if s.section else "") + f"\n   > {s.preview}"
+                      for s in result.cited) or "No passages cited."
+    trail = "\n".join(f"{i}. `{q}`" for i, q in enumerate(result.queries, start=1))
+    reviews = "\n".join(f"- round {i}: {'sufficient' if r.sufficient else 'needs more'}"
+                        + (f" ({r.missing})" if r.missing else "") for i, r in enumerate(result.reviews, 1))
+    t = result.trace
+    cost = (f"{t.get('calls', 0)} model calls, {t.get('input_tokens', 0):,} tokens in, "
+            f"{t.get('output_tokens', 0):,} out, ${t.get('cost_usd', 0):.4f}, {t.get('seconds', 0):.1f} s")
+    return (f"# {result.question}\n\n{answer}\n\n## Cited passages\n\n{cited}\n\n"
+            f"## How it got there\n\nStopped after {result.rounds} round(s): {result.status}. {cost}.\n\n"
+            f"Searches:\n\n{trail}\n" + (f"\nReviews:\n\n{reviews}\n" if reviews else ""))

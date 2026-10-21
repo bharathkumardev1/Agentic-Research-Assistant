@@ -34,7 +34,7 @@ def test_markers_are_one_indexed_and_contiguous():
 def test_sources_align_with_chunks():
     retrieved = _retrieved(2)
     _, sources = number_sources(retrieved)
-    for src, item in zip(sources, retrieved):
+    for src, item in zip(sources, retrieved, strict=True):
         assert src.chunk_id == item.chunk.chunk_id
         assert src.title == item.chunk.title
         assert src.paper_id == item.chunk.paper_id

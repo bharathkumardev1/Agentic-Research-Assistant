@@ -3,13 +3,13 @@
 Run locally with:
     uvicorn research_assistant.webapp:app --reload
 
-In production this is what the Dockerfile and render.yaml point at. On
+This is what the Docker image runs. On
 startup it looks for a previously ``ingest``-ed index at ``INDEX_DIR``
 (e.g. a mounted persistent volume) and loads that if present. Otherwise it
 falls back to building a fast, offline demo index from the bundled sample
 papers, so the service is demoable immediately after deploy with zero
-configuration. Either way, if ``ANTHROPIC_API_KEY`` is set, questions are
-answered by the real Claude API; otherwise the offline stub is used.
+configuration. Either way, if ``OPENAI_API_KEY`` is set, questions are
+answered by the configured model; otherwise the offline stub is used.
 
 Endpoints
 ---------
@@ -55,8 +55,8 @@ from .rate_limit import RateLimiter
 logger = get_logger("webapp")
 _state: dict = {"pipeline": None, "mode": "unknown"}
 _rate_limiter = RateLimiter()
-# A small pool just to enforce request timeouts; the actual work is CPU/IO
-# bound Claude + FAISS calls, not thread-heavy, so a handful is plenty.
+# A small pool just to enforce request timeouts; the work is mostly waiting on model
+# calls, so a handful of threads is plenty.
 _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="research")
 
 REQUEST_COUNT = Counter(
@@ -75,7 +75,7 @@ def _sample_dir():
 
 def _load_default_pipeline() -> None:
     settings = get_settings()
-    live_answers = bool(settings.anthropic_api_key)
+    live_answers = bool(settings.openai_api_key)
 
     # Only bother constructing a (possibly slow-to-load, model-downloading)
     # real embedding backend if there's actually a persisted index on disk;
@@ -112,8 +112,8 @@ async def _lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Agentic Research Assistant",
-    description="Multi-agent RAG over research papers, with citation-backed answers.",
-    version="0.3.0",
+    description="Answers questions about research papers, citing the passages it used.",
+    version="0.4.0",
     lifespan=_lifespan,
 )
 

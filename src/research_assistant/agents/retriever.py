@@ -1,22 +1,18 @@
-"""Retriever agent.
-
-Thin, dependency-light wrapper around the vector store. It exists as its own
-agent so the orchestration graph can reason about retrieval as a distinct
-step (and so query refinement from the evaluator flows through one place).
-"""
+"""Retriever: the top passages for a query from whatever store the run searches."""
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Protocol
 
-from ..rag.vector_store import FaissVectorStore
 from ..schemas import RetrievedChunk
 
 
-class RetrieverAgent:
-    """Fetches the most relevant chunks for a query from the vector store."""
+class Store(Protocol):
+    def search(self, query: str, k: int = 5) -> List[RetrievedChunk]: ...
 
-    def __init__(self, store: FaissVectorStore, top_k: int = 6) -> None:
+
+class RetrieverAgent:
+    def __init__(self, store: Store, top_k: int = 5) -> None:
         self.store = store
         self.top_k = top_k
 

@@ -9,7 +9,7 @@
 # transitive closure -- for a true lockfile, generate one with pip-tools
 # (`pip-compile`) or uv.
 
-anthropic==0.115.0
+openai==3.36.0
 langgraph==1.2.7
 faiss-cpu==1.14.3
 sentence-transformers==5.6.0

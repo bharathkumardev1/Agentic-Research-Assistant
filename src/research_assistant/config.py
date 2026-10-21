@@ -3,8 +3,7 @@
 
 All knobs live here so the agents and pipeline stay free of magic numbers.
 Environment variables are matched case-insensitively, e.g. ``TOP_K`` sets
-``Settings.top_k``. The Anthropic key uses the conventional
-``ANTHROPIC_API_KEY`` name.
+``Settings.top_k``. The OpenAI key uses the conventional ``OPENAI_API_KEY`` name.
 """
 
 from __future__ import annotations
@@ -26,14 +25,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Anthropic / Claude ------------------------------------------------
-    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-    summarizer_model: str = Field(default="claude-sonnet-4-6")
-    evaluator_model: str = Field(default="claude-opus-4-8")
-    max_tokens: int = Field(default=2048, ge=256)
-    max_api_calls: int = Field(
-        default=40, ge=1, description="Hard cap on Claude calls per pipeline run."
-    )
+    # Model calls. Model IDs are recorded with every reply, so results say what answered.
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    answer_model: str = Field(default="gpt-6-luna")
+    review_model: str = Field(default="gpt-6-luna")
+    judge_model: str = Field(default="gpt-6.1-sol", description="Grades answers in the evaluation.")
+    reasoning_effort: str = Field(default="low")
+    max_output_tokens: int = Field(default=2048, ge=256)
+    call_timeout_seconds: float = Field(default=60.0, gt=0, description="Per attempt of one model call.")
+    call_attempts: int = Field(default=3, ge=1, description="Tries per call on timeouts, 429s and 5xx.")
+    run_deadline_seconds: float = Field(default=120.0, gt=0, description="Checked before every model call.")
+    run_budget_usd: float = Field(default=0.50, gt=0, description="Spending cap for one question.")
     web_api_key: str = Field(
         default="",
         alias="WEB_API_KEY",
@@ -65,9 +67,8 @@ class Settings(BaseSettings):
         alias="REQUEST_TIMEOUT_SECONDS",
         description="Hard wall-clock cap on a single /research call; the caller gets a 504 if it's exceeded.",
     )
-    temperature: float = Field(default=0.2, ge=0.0, le=1.0)
 
-    # --- Embeddings / RAG --------------------------------------------------
+    # Embeddings and retrieval.
     # "sentence-transformers" (default, high quality) or "hashing"
     # (dependency-free, deterministic; used for offline tests / dry runs).
     embedding_backend: str = Field(default="sentence-transformers")
@@ -76,26 +77,20 @@ class Settings(BaseSettings):
 
     chunk_size: int = Field(default=1100, ge=200, description="Max chars per chunk.")
     chunk_overlap: int = Field(default=150, ge=0, description="Overlap chars.")
-    top_k: int = Field(default=6, ge=1, description="Chunks retrieved per query.")
+    top_k: int = Field(default=5, ge=1, description="Chunks retrieved per query.")
 
-    # --- Agentic loop ------------------------------------------------------
-    max_iterations: int = Field(
-        default=3, ge=1, description="Max retrieve→summarize→evaluate cycles."
-    )
+    # The loop: retrieve, answer, review, and again with a refined query, at most this often.
+    max_rounds: int = Field(default=3, ge=1, description="1 is the single-pass baseline.")
 
-    # --- Storage -----------------------------------------------------------
+    # Storage.
     index_dir: Path = Field(default=Path("data/index"))
     raw_dir: Path = Field(default=Path("data/raw"))
 
     def require_api_key(self) -> str:
-        """Return the API key or raise a friendly error if it is missing."""
-        if not self.anthropic_api_key:
-            raise RuntimeError(
-                "ANTHROPIC_API_KEY is not set. Add it to your environment or a "
-                ".env file (see .env.example). For an offline demonstration that "
-                "does not call the API, run with --dry-run."
-            )
-        return self.anthropic_api_key
+        if not self.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set. Add it to the environment or .env, "
+                               "or run with --dry-run to use the offline stub.")
+        return self.openai_api_key
 
 
 @lru_cache(maxsize=1)

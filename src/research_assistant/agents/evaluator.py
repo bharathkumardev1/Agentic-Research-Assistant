@@ -1,9 +1,8 @@
-"""Evaluator agent.
+"""Reviewer: is the answer supported by the passages it cites, and does it answer the question?
 
-Judges whether the current synthesis is well-grounded and adequately answers
-the question. When it is not, the evaluator proposes a refined search query,
-which the graph uses to loop back into retrieval — the core of the agentic
-self-correction behaviour.
+When it doesn't, the reviewer names what's missing and a search query likely to find it,
+and the loop retrieves again with that query. That loop is the "agentic" part; the QASPER
+evaluation measures whether it earns its extra calls.
 """
 
 from __future__ import annotations
@@ -11,63 +10,42 @@ from __future__ import annotations
 import json
 from typing import List
 
-from ..llm import LLMClient
-from ..schemas import Evaluation, PaperSummary, SourceRef
+from ..llm import LLMClient, Reply, Request
+from ..schemas import Answer, Review, SourceRef
 
 SYSTEM = (
-    "You are a critical peer reviewer evaluating a research synthesis. You check "
-    "two things: (1) grounding — is every claim supported by the cited sources, "
-    "with no fabrication; and (2) coverage — does the synthesis actually answer "
-    "the question. You are concise, fair and decisive."
+    "You review an answer to a question about a research paper. Check two things: is every "
+    "part of the answer supported by the passages it cites, and does it actually answer the "
+    "question. Say it's sufficient when both hold, or when the passages plainly can't answer "
+    "the question and the answer says so. Otherwise name what's missing and write one search "
+    "query that would find it in the paper."
 )
-
-_PROMPT = """\
-Research question:
-{question}
-
-Candidate synthesis (JSON):
-{summary_json}
-
-Available source previews (the only evidence that exists):
-{previews}
-
-Assess the synthesis and return a single JSON object with EXACTLY these keys:
-{{
-  "grounded":        boolean - true if all claims are supported by the sources,
-  "coverage_score":  number between 0 and 1 - how fully the question is answered,
-  "sufficiency":     "sufficient" or "needs_more",
-  "critique":        string - one or two sentences of specific feedback,
-  "missing_aspects": array of strings - aspects of the question not yet covered (may be empty),
-  "refined_query":   string or null - if "needs_more", a focused search query likely to surface the missing evidence; otherwise null
-}}
-
-Mark "needs_more" only when additional retrieval would plausibly improve the
-answer and you can name a concrete, better query.
-"""
+SCHEMA = {
+    "type": "object",
+    "properties": {"sufficient": {"type": "boolean"}, "grounded": {"type": "boolean"},
+                   "missing": {"type": "string"}, "refined_query": {"type": "string"}},
+    "required": ["sufficient", "grounded", "missing", "refined_query"],
+    "additionalProperties": False,
+}
 
 
 class EvaluatorAgent:
-    """Wraps an LLM to emit a validated :class:`Evaluation`."""
-
-    def __init__(self, client: LLMClient, model: str, max_tokens: int = 1024) -> None:
+    def __init__(self, client: LLMClient, model: str, max_output_tokens: int = 1024,
+                 reasoning_effort: str | None = "low") -> None:
         self.client = client
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_output_tokens = max_output_tokens
+        self.reasoning_effort = reasoning_effort
 
-    def evaluate(
-        self, question: str, summary: PaperSummary, sources: List[SourceRef]
-    ) -> Evaluation:
-        previews = "\n".join(f"[{s.marker}] {s.title}: {s.preview}" for s in sources)
-        prompt = _PROMPT.format(
-            question=question,
-            summary_json=json.dumps(summary.model_dump(), indent=2),
-            previews=previews or "(no sources)",
-        )
-        data = self.client.complete_json(
-            model=self.model,
-            system=SYSTEM,
-            prompt=prompt,
-            max_tokens=self.max_tokens,
-            temperature=0.0,
-        )
-        return Evaluation.model_validate(data)
+    def request(self, question: str, answer: Answer, sources: List[SourceRef]) -> Request:
+        cited = [s for s in sources if s.marker in set(answer.evidence)]
+        shown = "\n".join(f"[{s.marker}] {s.preview}" for s in cited) or "(no passages cited)"
+        prompt = (f"Question: {question}\n\nAnswer: {json.dumps(answer.model_dump())}\n\n"
+                  f"Cited passages:\n{shown}")
+        return Request(model=self.model, system=SYSTEM, prompt=prompt,
+                       max_output_tokens=self.max_output_tokens, json_schema=SCHEMA,
+                       reasoning_effort=self.reasoning_effort)
+
+    def evaluate(self, question: str, answer: Answer, sources: List[SourceRef]) -> tuple[Review, Reply]:
+        reply = self.client.complete(self.request(question, answer, sources))
+        return Review.model_validate(reply.json()), reply

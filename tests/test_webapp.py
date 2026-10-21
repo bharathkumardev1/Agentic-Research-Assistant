@@ -30,9 +30,8 @@ def test_research_runs_the_pipeline(client):
     response = client.post("/research", json={"question": "What methods are used?"})
     assert response.status_code == 200
     body = response.json()
-    assert "summary" in body
-    assert "sources" in body
-    assert body["iterations"] >= 1
+    assert body["answer"]["answer"] and body["cited"]
+    assert body["rounds"] >= 1 and body["trace"]["calls"] >= 1
 
 
 def test_research_rejects_empty_question(client):

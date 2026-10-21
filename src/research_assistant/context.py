@@ -1,7 +1,7 @@
-"""Turn retrieved chunks into a numbered context block and citation list.
+"""Turn retrieved chunks into the numbered passages the model reads, and their citations.
 
-Keeping this in one place guarantees the ``[n]`` markers the summarizer is
-asked to cite line up exactly with the bibliography rendered in the report.
+Keeping this in one place guarantees that the [n] the answerer cites is the passage the
+report shows as [n].
 """
 
 from __future__ import annotations
@@ -12,24 +12,14 @@ from .schemas import RetrievedChunk, SourceRef
 
 
 def number_sources(retrieved: List[RetrievedChunk]) -> Tuple[str, List[SourceRef]]:
-    """Return a ``(context_block, sources)`` pair.
-
-    ``context_block`` is the numbered text passed to the model; ``sources`` is
-    the matching list of :class:`SourceRef` entries (one per marker).
-    """
+    """``(passages, sources)``: the numbered text for the prompt and one SourceRef per number."""
     lines: List[str] = []
     sources: List[SourceRef] = []
     for marker, item in enumerate(retrieved, start=1):
         chunk = item.chunk
-        lines.append(f'[{marker}] (source: "{chunk.title}")\n{chunk.text}')
-        sources.append(
-            SourceRef(
-                marker=marker,
-                paper_id=chunk.paper_id,
-                title=chunk.title,
-                chunk_id=chunk.chunk_id,
-                source=chunk.source,
-                preview=chunk.short(180),
-            )
-        )
+        where = chunk.section or chunk.title
+        lines.append(f"[{marker}] ({where})\n{' '.join(chunk.text.split())}")
+        sources.append(SourceRef(marker=marker, paper_id=chunk.paper_id, title=chunk.title,
+                                 chunk_id=chunk.chunk_id, section=chunk.section,
+                                 preview=chunk.short(180)))
     return "\n\n".join(lines), sources
