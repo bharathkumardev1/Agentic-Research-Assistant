@@ -16,9 +16,10 @@ from ..schemas import Answer, Review, SourceRef
 SYSTEM = (
     "You review an answer to a question about a research paper. Check two things: is every "
     "part of the answer supported by the passages it cites, and does it actually answer the "
-    "question. Say it's sufficient when both hold, or when the passages plainly can't answer "
-    "the question and the answer says so. Otherwise name what's missing and write one search "
-    "query that would find it in the paper."
+    "question. Say it's sufficient when both hold. When the answer says the passages don't "
+    "answer the question, you see every passage it had: say it's sufficient only if none of "
+    "them answers it. Otherwise name what's missing and write one search query that would "
+    "find it in the paper."
 )
 SCHEMA = {
     "type": "object",
@@ -38,10 +39,14 @@ class EvaluatorAgent:
         self.reasoning_effort = reasoning_effort
 
     def request(self, question: str, answer: Answer, sources: List[SourceRef]) -> Request:
-        cited = [s for s in sources if s.marker in set(answer.evidence)]
-        shown = "\n".join(f"[{s.marker}] {s.preview}" for s in cited) or "(no passages cited)"
-        prompt = (f"Question: {question}\n\nAnswer: {json.dumps(answer.model_dump())}\n\n"
-                  f"Cited passages:\n{shown}")
+        # A cited answer is checked against what it cites; a declined one against everything it
+        # had, since "the passages don't say" can only be checked by reading them.
+        if answer.unanswerable:
+            label, shown = "Passages the answer had", sources
+        else:
+            label, shown = "Cited passages", [s for s in sources if s.marker in set(answer.evidence)]
+        body = "\n\n".join(f"[{s.marker}] ({s.section or s.title})\n{s.text}" for s in shown) or "(none)"
+        prompt = f"Question: {question}\n\nAnswer: {json.dumps(answer.model_dump())}\n\n{label}:\n{body}"
         return Request(model=self.model, system=SYSTEM, prompt=prompt,
                        max_output_tokens=self.max_output_tokens, json_schema=SCHEMA,
                        reasoning_effort=self.reasoning_effort)

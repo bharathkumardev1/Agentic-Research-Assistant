@@ -51,6 +51,7 @@ class SourceRef(BaseModel):
     chunk_id: str
     section: str = ""
     preview: str = ""
+    text: str = ""  # the passage exactly as the model read it
 
 
 class Answer(BaseModel):
