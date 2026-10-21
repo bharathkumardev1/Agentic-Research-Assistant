@@ -1,53 +1,33 @@
-# Agentic Research Assistant
+# The research assistant's API. Model weights and indexes are mounted at run time, not
+# baked in.
 #
-# Build:        docker build -t research-assistant .
-# Run the API:  docker run --rm -p 8000:8000 research-assistant
-#               then: curl http://localhost:8000/health
-# Run the CLI:  docker run --rm research-assistant research-assistant demo
-# Live API:     docker run --rm -p 8000:8000 --env-file .env research-assistant
+#   docker build -t research-assistant .
 #
-# The image ships with the offline demo data pre-baked, so the web service
-# answers questions immediately after `docker run`, no volumes or env vars
-# required. Set ANTHROPIC_API_KEY (via --env-file .env) for real Claude
-# answers; the service still starts fine without it, in dry-run mode.
+# With nothing set, it answers questions about the three sample papers using hashing
+# embeddings and the offline stub, which is what CI's smoke test runs:
 #
-# For a real corpus: mount a volume at INDEX_DIR, run
-# `research-assistant ingest ...` against it once, and the web service will
-# load that persisted index on startup instead of the bundled demo papers.
+#   docker run --rm -p 8000:8000 research-assistant
 #
-# Scaling: set WEB_CONCURRENCY to run multiple uvicorn workers (each loads
-# its own copy of the index into memory). Rate limiting and per-run state
-# are in-memory and per-process, so they don't coordinate across workers or
-# replicas -- see research_assistant/rate_limit.py.
+# With a key, MiniLM weights and an index built by `research-assistant ingest`:
+#
+#   docker run --rm -p 8000:8000 --env-file .env \
+#     -v "$PWD/models:/app/models:ro" -v "$PWD/data/index:/app/data/index:ro" research-assistant
+#
+# GET /health says whether answers come from the model or the stub.
+FROM python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2
 
-FROM python:3.11-slim AS base
-
-# faiss-cpu and numpy need a C toolchain on some platforms; keep the image
-# lean by removing build tools after install in a single layer.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTHONPATH=/app/src \
+    OMP_NUM_THREADS=1
 
 WORKDIR /app
+COPY requirements.lock .
+RUN pip install --require-hashes -r requirements.lock
+COPY src ./src
+COPY examples ./examples
 
-# Install dependencies first so this layer is cached across code changes.
-COPY pyproject.toml requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-RUN pip install --no-cache-dir --no-deps -e .
-
-# Run as a non-root user.
-RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /app
-USER appuser
-
-ENV PYTHONUNBUFFERED=1 \
-    LOG_LEVEL=INFO \
-    INDEX_DIR=/app/data/index \
-    PORT=8000 \
-    WEB_CONCURRENCY=1
-
+RUN useradd --create-home --uid 1000 app && mkdir data && chown app data
+USER app
 EXPOSE 8000
-
-CMD ["sh", "-c", "uvicorn research_assistant.webapp:app --host 0.0.0.0 --port ${PORT} --workers ${WEB_CONCURRENCY}"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+CMD ["uvicorn", "research_assistant.webapp:app", "--host", "0.0.0.0", "--port", "8000"]
