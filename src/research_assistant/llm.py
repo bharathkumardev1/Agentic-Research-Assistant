@@ -46,6 +46,15 @@ class MissingRecording(LLMError):
     """Replay-only mode met a request that was never recorded."""
 
 
+class IncompleteReply(LLMError):
+    """The reply was cut off at max_output_tokens. It was billed, so it carries its cost."""
+
+    def __init__(self, reply: Reply) -> None:
+        super().__init__(f"response {reply.status} after {reply.output_tokens} output tokens "
+                         f"({reply.reasoning_tokens} reasoning); the call can be retried")
+        self.reply = reply
+
+
 @dataclass(frozen=True)
 class Request:
     model: str
@@ -189,10 +198,10 @@ class OpenAIClient:
         if self.budget is not None:
             self.budget.check(request)
         reply = with_retries(lambda: self._once(request), self.attempts)
-        if reply.status != "completed":
-            raise LLMError(f"response {reply.status}: the output was cut short, raise max_output_tokens")
         if self.budget is not None:
-            self.budget.charge(reply)
+            self.budget.charge(reply)  # a cut-off reply is billed too
+        if reply.status != "completed":
+            raise IncompleteReply(reply)
         return reply
 
 
@@ -237,11 +246,16 @@ class StubClient:
 
 @dataclass
 class Recorder:
-    """Replies by request hash, appended to a JSONL file and replayed from it."""
+    """Replies by request hash, appended to a JSONL file and replayed from it.
+
+    A reply cut off at max_output_tokens is written down too, marked incomplete: it's never
+    replayed, so a rerun makes the call again, but its cost stays in the recorded spend that
+    the cap is checked against."""
 
     path: Path
     client: Optional[LLMClient] = None  # None means replay only
     calls: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    incomplete: List[Dict[str, Any]] = field(default_factory=list)
     made: int = 0
     replayed: int = 0
 
@@ -250,11 +264,19 @@ class Recorder:
         if self.path.exists():
             for line in self.path.read_text(encoding="utf8").splitlines():
                 rec = json.loads(line)
-                self.calls[rec["key"]] = rec
+                if rec.get("incomplete"):
+                    self.incomplete.append(rec)
+                else:
+                    self.calls[rec["key"]] = rec
 
     @property
     def recorded_spend_usd(self) -> float:
-        return sum(cost(Reply(**rec["reply"])) for rec in self.calls.values())
+        return sum(cost(Reply(**rec["reply"])) for rec in [*self.calls.values(), *self.incomplete])
+
+    def _append(self, rec: Dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "a", encoding="utf8") as fh:
+            fh.write(json.dumps(rec) + "\n")
 
     def complete(self, request: Request, tag: Optional[Dict[str, Any]] = None) -> Reply:
         key = request.key()
@@ -265,12 +287,16 @@ class Recorder:
             return reply
         if self.client is None:
             raise MissingRecording(f"no recorded reply for {tag or request.model}; rerun with a key to make it")
-        reply = self.client.complete(request)
+        try:
+            reply = self.client.complete(request)
+        except IncompleteReply as exc:
+            rec = {"key": key, "tag": tag or {}, "reply": asdict(exc.reply), "incomplete": True}
+            self.incomplete.append(rec)
+            self._append(rec)
+            raise
         rec = {"key": key, "tag": tag or {}, "reply": asdict(reply)}
         self.calls[key] = rec
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a", encoding="utf8") as fh:
-            fh.write(json.dumps(rec) + "\n")
+        self._append(rec)
         self.made += 1
         return reply
 

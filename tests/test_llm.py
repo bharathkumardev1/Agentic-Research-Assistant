@@ -7,8 +7,10 @@ import pytest
 from research_assistant.llm import (
     Budget,
     BudgetExceeded,
+    IncompleteReply,
     LLMError,
     MissingRecording,
+    OpenAIClient,
     Recorder,
     Reply,
     Request,
@@ -84,6 +86,44 @@ def test_recorder_replays_by_request_and_refuses_unrecorded_calls_in_replay_mode
     with pytest.raises(MissingRecording):
         replay.complete(Request(model="gpt-6-luna", system="answer", prompt="something else"))
     assert json.loads(path.read_text().splitlines()[0])["tag"] == {"q": 1}
+
+
+def cut_off(model="gpt-6-luna"):
+    return Reply(text='{"answer": "', model=model, input_tokens=1000, output_tokens=100, reasoning_tokens=90,
+                 status="incomplete")
+
+
+def test_a_cut_off_reply_is_billed_and_raises():
+    client = OpenAIClient.__new__(OpenAIClient)
+    client.attempts, client.budget = 1, Budget(1.0)
+    client._once = lambda request: cut_off()
+    with pytest.raises(IncompleteReply):
+        client.complete(REQ)
+    assert client.budget.spent_usd == pytest.approx(cost(cut_off())) and client.budget.spent_usd > 0
+
+
+def test_a_cut_off_reply_counts_toward_the_cap_but_is_never_replayed(tmp_path):
+    class CutOffOnce(StubClient):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def complete(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                raise IncompleteReply(cut_off())
+            return super().complete(request)
+
+    path = tmp_path / "calls.jsonl"
+    live = Recorder(path, CutOffOnce())
+    with pytest.raises(IncompleteReply):
+        live.complete(REQ)
+    assert live.recorded_spend_usd == pytest.approx(cost(cut_off()))
+    with pytest.raises(MissingRecording):
+        Recorder(path).complete(REQ)  # the cut-off reply isn't something to replay
+    assert Recorder(path).recorded_spend_usd == pytest.approx(cost(cut_off()))
+    reply = live.complete(REQ)  # retried: the second call completes and is recorded
+    assert not reply.replayed and Recorder(path).complete(REQ).replayed
 
 
 def test_reply_json_must_be_an_object():
