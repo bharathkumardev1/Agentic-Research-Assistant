@@ -191,3 +191,23 @@ def test_replay_export_refuses_a_results_file_the_recording_doesnt_match(tmp_pat
     with pytest.raises(ValueError, match="replayed differently"):
         export(Q.load(MINI), res, Recorder(record), log, HashingEmbeddings(256), [res["rows"][1]["question_id"]],
                2, "low")
+
+
+def test_results_say_who_made_the_judge_labels(tmp_path):
+    from research_assistant.eval.report import section, write_markdown
+
+    res = stub_meta(evaluate(Recorder(tmp_path / "calls.jsonl", StubClient())))
+    res.update(questions=3, seed=0, recorded_spend_usd=0.0, cap_usd=5.0)
+    res["meta"].update(git_dirty=False, reasoning_effort="low", top_k=2, embeddings="hashing")
+    res["judge_check"] = {"labels": "results/qasper/labels.csv", "labeled": 40, "agreement": 0.875,
+                          "cohens_kappa": 0.7436, "judge_lenient": 4, "judge_strict": 1}
+    text = section(res, "an AI-assisted draft, not independent human annotation")
+    assert "agreed with the 40 labels in `results/qasper/labels.csv` on 87.5%" in text
+    assert "How the labels were made: an AI-assisted draft" in text
+    assert "a person" not in text and "hand-graded" not in text
+
+    (tmp_path / "qasper").mkdir()
+    (tmp_path / "qasper" / "LABELS.md").write_text("# Labels\n\nStatus: pending an independent grade.\n")
+    (tmp_path / "qasper-dev.json").write_text(json.dumps(res))
+    write_markdown(tmp_path, tmp_path / "RESULTS.md")
+    assert "How the labels were made: pending an independent grade." in (tmp_path / "RESULTS.md").read_text()

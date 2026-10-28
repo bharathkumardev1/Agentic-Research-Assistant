@@ -1,0 +1,27 @@
+title = "Agentic-Research-Assistant"
+
+[extend]
+useDefault = true
+
+# The recordings key every model reply and every search by a SHA-256 hash, in a field called
+# "key": a hash of the request for calls.jsonl, and of [paper, query, k, embeddings] for the
+# searches in runs.jsonl. Gitleaks' generic-api-key rule reads each 64-hex value as a secret.
+#
+# `gitleaks dir` reads a file in chunks, and a chunk can end inside a hash, so a finding can
+# hold only the first 10 to 63 characters of one. The exception therefore takes hex values of
+# 10 to 64 characters.
+#
+# It needs all three conditions: the finding comes from generic-api-key, it is in one of those
+# two files, and the matched value is lowercase hex. A finding of any other rule, a
+# generic-api-key finding of any other shape, or one in any other file is still reported.
+# Needs gitleaks 8.25 or later for the `[[allowlists]]` table.
+[[allowlists]]
+description = "SHA-256 request hashes in the evaluation recordings"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^results/qasper/(calls|runs)\.jsonl$''',
+]
+regexes = [
+  '''^[0-9a-f]{10,64}$''',
+]

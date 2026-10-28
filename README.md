@@ -2,7 +2,7 @@
 
 Answers questions about research papers and cites the passages it used. It retrieves passages, drafts an answer, and has a second model call review that answer against the passages it cites. When the review finds the answer unsupported or incomplete, it writes a new search query and the loop goes around again, up to three rounds.
 
-What I wanted to know is whether the review loop is worth it. Every extra round costs model calls and seconds, so this repo measures the loop against a single pass (retrieve once, answer once) on QASPER: the dataset's official answer F1 and evidence F1, a model judge that I check against my own grades, and the dollars and seconds each system spends per question.
+What I wanted to know is whether the review loop is worth it. Every extra round costs model calls and seconds, so this repo measures the loop against a single pass (retrieve once, answer once) on QASPER: the dataset's official answer F1 and evidence F1, a model judge checked against 40 labels, and the dollars and seconds each system spends per question.
 
 ## How a question is answered
 
@@ -42,10 +42,23 @@ QASPER ([Dasigi et al., NAACL 2021](https://aclanthology.org/2021.naacl-main.365
 - Both systems use the same retrieval and the same models: gpt-6-luna answers and reviews with low reasoning effort, and gpt-6.1-sol grades. The loop's first round sends exactly the single pass's request, so its first answer is the single pass's answer, replayed rather than paid for twice, and any difference between the two comes from the review rounds.
 - Answer F1 and evidence F1 are the official metrics, ported from the evaluator in [allenai/qasper-led-baseline](https://github.com/allenai/qasper-led-baseline) (`scripts/evaluator.py` at `afd0fb9`): token F1 against each annotator, keeping the best, and evidence over text paragraphs only, since this system can't retrieve a figure or a table.
 - Token F1 scores a right answer low when it's worded differently from every annotator, so a judge model also grades each answer correct or incorrect against the annotators' answers. Exact matches skip the judge.
-- I grade 40 of the judged test answers myself without seeing the judge's verdicts, and the results report how often we agree and Cohen's kappa.
+- 40 of the judged test answers carry a label, and the results report how often the judge agrees with them and Cohen's kappa. Those 40 labels are an AI-assisted draft, not independent human annotation, so the agreement figure is not a human-versus-judge result. An independent grade is pending (`results/qasper/LABELS.md`).
 - Differences between the systems are paired by question, with 95% intervals from 10,000 bootstrap resamples.
 - Each wrong answer gets the first stage that failed: evidence not retrieved, retrieved but not cited, cited but answered wrong, declined an answerable question, or answered an unanswerable one.
 - Spending is capped at $25 across everything recorded. Before each call the client prices the worst case, counting the prompt at a deliberately high one token per three characters plus the full output allowance, and refuses a call that could cross the cap.
+
+## Results
+
+Run on 2026-10-28 at commit `daac2a1`, seed 0, 150 dev and 150 test questions; the full tables, with intervals, are in [`results/RESULTS.md`](results/RESULTS.md), and `make check-replay` reproduces every row with no key. The whole recording cost $0.39 of a $5 cap.
+
+| Split | System | Answer F1 | Evidence F1 | Judged correct | Calls per question | p95 seconds |
+|---|---|---|---|---|---|---|
+| dev | single pass | 0.337 | 0.447 | 49.3% | 1.0 | 2.9 |
+| dev | loop | 0.349 | 0.455 | 50.7% | 2.5 | 10.8 |
+| test | single pass | 0.435 | 0.563 | 56.0% | 1.0 | 2.2 |
+| test | loop | 0.441 | 0.587 | 58.7% | 2.5 | 11.0 |
+
+The loop scores a little higher on every measure and the difference is within noise. Paired by question, the 95% interval on the answer F1 difference is -0.011 to +0.037 on dev and -0.015 to +0.029 on test. Evidence F1 on test is +0.024 (-0.003 to +0.051), and judged accuracy on test is +2.7 points (0.000 to +0.060), which is 5 questions where the loop was right and the single pass wrong against 1 the other way. With six comparisons, I don't read any of those as a finding. The loop ran 2.5 calls per question against 1, answering cost about three times as much per question ($0.00028 against $0.00009 on test), and the slowest 5% of questions took about 11 seconds against 2 to 3. Counting judging, the dollars per question differ by about 20% ($0.0011 against $0.0009), because judging dominates the bill. On this sample I can't say the loop is worth its extra calls.
 
 ## Rerunning the numbers without a key
 
@@ -85,8 +98,8 @@ The QASPER evaluation calls the API, and the cap stops it at $25:
 make qasper      # dev and test sets, with the release tarballs' SHA-256 recorded
 make eval-dev    # 150 dev questions through both systems
 make eval-test   # 150 test questions, once
-make labels      # 40 judged answers for you to grade, in results/qasper/labels.csv
-make agreement   # the judge against your grades, written into the results
+make labels      # 40 judged answers to grade, in results/qasper/labels.csv
+make agreement   # the judge against those labels, written into the results
 make check-replay
 ```
 
@@ -133,8 +146,9 @@ The web service's settings are in `.env.example`.
 
 - QASPER papers are all NLP, and the evaluation searches each question's own paper. With many papers in one index, which `research` allows, retrieval has more ways to go wrong than this measures.
 - Figures and tables aren't indexed. Questions whose evidence is a table are scored on text evidence only and are harder to answer.
-- With 150 test questions, the 95% interval on judged accuracy is 7 to 8 points either side, so a small difference between the systems will show up as a tie.
-- The judge is a model. Forty hand-graded answers say how far to trust it, not that it's right on the rest.
+- With 150 test questions, the 95% interval on judged accuracy is 8 points either side, so a small difference between the systems will show up as a tie, and it did.
+- The judge is a model. The 40 labels that check it are an AI-assisted draft, cover 36 distinct questions, and apply a stricter standard than the judge's rubric in several rows. They say little about how far to trust the judge.
+- One seed, one sample of 150 questions per split, one model pair and one embedding model.
 - Prices in `llm.py` are copied from OpenAI's pricing page on 2026-10-21. If they change, the recorded dollars go stale and `check-replay` flags it.
 
 ## Layout
