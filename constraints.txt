@@ -1,4 +1,4 @@
-# The versions the recorded QASPER run was embedded with. `make lock` holds requirements.lock
+# The versions a recorded QASPER run is embedded with. `make lock` holds requirements.lock
 # to them, so a replay computes the same similarities the recording logged.
 numpy==2.5.4
 onnxruntime==1.31.0
