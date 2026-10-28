@@ -40,7 +40,7 @@ def _ci(ci: list) -> str:
     return f"{ci[0]:.3f} to {ci[1]:.3f}"
 
 
-def section(res: Dict[str, Any]) -> str:
+def section(res: Dict[str, Any], labels_status: Optional[str] = None) -> str:
     m, s = res["meta"], res["summary"]
     lines = [
         f"## QASPER {res['split']}: {res['questions']} questions (seed {res['seed']})\n",
@@ -71,16 +71,30 @@ def section(res: Dict[str, Any]) -> str:
               for name, v in s["systems"].items()]
     if res.get("judge_check", {}).get("labeled"):
         j = res["judge_check"]
-        lines += ["", f"The judge agreed with a person on {j['agreement']:.0%} of {j['labeled']} hand-graded "
-                      f"answers (Cohen's kappa {j['cohens_kappa']:.2f}); it passed {j['judge_lenient']} the person "
-                      f"failed and failed {j['judge_strict']} the person passed."]
+        lines += ["", f"The judge agreed with the {j['labeled']} labels in `{j['labels']}` on {j['agreement']:.1%} of "
+                      f"answers (Cohen's kappa {j['cohens_kappa']:.2f}); it passed {j['judge_lenient']} the labels "
+                      f"failed and failed {j['judge_strict']} the labels passed."]
+        if labels_status:
+            lines.append(f"\nHow the labels were made: {labels_status}")
     return "\n".join(lines) + "\n"
+
+
+def labels_status(results_dir: Path) -> Optional[str]:
+    """The status line of results/qasper/LABELS.md, so RESULTS.md says who made the labels."""
+    f = Path(results_dir) / "qasper" / "LABELS.md"
+    if not f.exists():
+        return None
+    for line in f.read_text(encoding="utf8").splitlines():
+        if line.lower().startswith("status:"):
+            return line.split(":", 1)[1].strip()
+    return None
 
 
 def write_markdown(results_dir: Path, path: Path) -> None:
     parts = ["# Results\n"]
+    status = labels_status(results_dir)
     for split in ("dev", "test"):
         f = Path(results_dir) / f"qasper-{split}.json"
         if f.exists():
-            parts.append(section(json.loads(f.read_text())))
+            parts.append(section(json.loads(f.read_text()), status))
     Path(path).write_text("\n".join(parts), encoding="utf8")
