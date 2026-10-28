@@ -87,3 +87,25 @@ def test_load_rejects_dim_mismatch(tmp_path):
 def test_load_missing_index_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         VectorStore.load(tmp_path, HashingEmbeddings(dim=512))
+
+
+def test_ties_at_the_cutoff_go_to_the_earlier_passage(monkeypatch):
+    class Flat:
+        name, dim = "flat", 2
+
+        def embed(self, texts):
+            import numpy as np
+
+            return np.tile(np.array([[1.0, 0.0]], dtype="float32"), (len(texts), 1))
+
+    store = VectorStore(Flat())
+    store.add([Chunk(chunk_id=f"p::{i}", paper_id="p", title="t", text=f"t{i}", chunk_index=i)
+               for i in range(6)])
+    expect = ["p::0", "p::1", "p::2"]
+    assert [r.chunk.chunk_id for r in store.search("q", k=3)] == expect
+
+    # Another valid partition (what a different numpy build may return) must not change it.
+    import numpy as np
+
+    monkeypatch.setattr(np, "argpartition", lambda a, kth: np.arange(len(a))[::-1].copy())
+    assert [r.chunk.chunk_id for r in store.search("q", k=3)] == expect
