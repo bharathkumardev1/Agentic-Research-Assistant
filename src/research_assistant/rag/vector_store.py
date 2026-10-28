@@ -53,8 +53,10 @@ class VectorStore:
             return []
         scores = self.similarities(query)
         k = min(k, len(scores))
-        top = np.argpartition(-scores, k - 1)[:k]
-        top = top[np.lexsort((top, -scores[top]))]
+        # A stable sort, not argpartition: when scores tie at the k-th place, argpartition
+        # keeps whichever tied passages its internals reach first, which differs between
+        # numpy builds and platforms. Ties must go to the earlier passage everywhere.
+        top = np.argsort(-scores, kind="stable")[:k]
         return [RetrievedChunk(chunk=self.chunks[int(i)], score=float(scores[i])) for i in top]
 
     def save(self, directory: Path) -> None:
