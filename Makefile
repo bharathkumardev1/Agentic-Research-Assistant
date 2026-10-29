@@ -19,7 +19,7 @@ demo: ## The loop on the bundled sample papers with the offline stub
 qasper: ## Download the QASPER dev and test sets and record the tarballs' SHA-256
 	research-assistant qasper-download
 
-eval-dev: ## QASPER dev sample, 150 questions; needs OPENAI_API_KEY, $25 cap across the recording
+eval-dev: ## QASPER dev sample, 150 questions; needs OPENAI_API_KEY, $25 default cap across the recording (the recorded runs used --cap 5)
 	research-assistant eval --split dev
 
 eval-test: ## QASPER test sample, 150 questions; run once, after dev settled every choice
