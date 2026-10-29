@@ -45,7 +45,7 @@ QASPER ([Dasigi et al., NAACL 2021](https://aclanthology.org/2021.naacl-main.365
 - 40 of the judged test answers carry a label, and the results report how often the judge agrees with them and Cohen's kappa. Those 40 labels are an AI-assisted draft, not independent human annotation, so the agreement figure is not a human-versus-judge result. An independent grade is pending (`results/qasper/LABELS.md`).
 - Differences between the systems are paired by question, with 95% intervals from 10,000 bootstrap resamples.
 - Each wrong answer gets the first stage that failed: evidence not retrieved, retrieved but not cited, cited but answered wrong, declined an answerable question, or answered an unanswerable one.
-- Spending is capped at $25 across everything recorded. Before each call the client prices the worst case, counting the prompt at a deliberately high one token per three characters plus the full output allowance, and refuses a call that could cross the cap.
+- Spending is capped across everything recorded, at $25 by default (`--cap`). The recorded QASPER runs passed `--cap 5`, so their ceiling was $5. Before each call the client prices the worst case, counting the prompt at a deliberately high one token per three characters plus the full output allowance, and refuses a call that could cross the cap.
 
 ## Results
 
@@ -92,7 +92,7 @@ research-assistant research "..." --max-rounds 1              # single pass
 research-assistant research "..." --json                      # everything, trace included
 ```
 
-The QASPER evaluation calls the API, and the cap stops it at $25:
+The QASPER evaluation calls the API, and the cap stops it at $25 unless you pass `--cap`. The recorded runs used `--cap 5`:
 
 ```bash
 make qasper      # dev and test sets, with the release tarballs' SHA-256 recorded
