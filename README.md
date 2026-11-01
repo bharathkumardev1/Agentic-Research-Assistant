@@ -4,6 +4,8 @@ Answers questions about research papers and cites the passages it used. It retri
 
 What I wanted to know is whether the review loop is worth it. Every extra round costs model calls and seconds, so this repo measures the loop against a single pass (retrieve once, answer once) on QASPER: the dataset's official answer F1 and evidence F1, a model judge checked against 40 labels, and the dollars and seconds each system spends per question.
 
+On the 150 test questions the loop ties the single pass: judged correct 58.7% against 56.0%, within noise, at 2.5 model calls a question instead of 1.
+
 ## How a question is answered
 
 ```mermaid
