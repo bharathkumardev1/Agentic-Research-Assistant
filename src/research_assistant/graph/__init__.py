@@ -1,1 +1,1 @@
-"""LangGraph orchestration of the retriever → summarizer → evaluator loop."""
+"""The retrieve, answer, review loop as a LangGraph graph."""

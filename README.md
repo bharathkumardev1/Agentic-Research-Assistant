@@ -166,6 +166,10 @@ src/research_assistant/
   cli.py              the research-assistant command
 ```
 
+## History
+
+I started this in July 2026 as a LangGraph demo built on the Claude API (tag `v0.2.0`). In October I rebuilt it around the QASPER evaluation and moved the model calls to OpenAI; this README describes the October version.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

@@ -1,1 +1,1 @@
-"""Retrieval-augmented generation: embeddings and the FAISS vector store."""
+"""Retrieval: MiniLM embeddings and an exact numpy search."""
