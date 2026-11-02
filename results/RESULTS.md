@@ -87,3 +87,7 @@ Where answers went wrong (first failing stage):
 | loop | 0 | 16 | 88 | 23 | 20 | 3 |
 | single pass, top 10 | 3 | 14 | 102 | 16 | 11 | 4 |
 | single pass, top 15 | 2 | 18 | 102 | 12 | 8 | 8 |
+
+The judge agreed with the 40 labels in `results/qasper/labels-independent.csv` on 87.5% of answers (Cohen's kappa 0.75); it passed 2 the labels failed and failed 3 the labels passed.
+
+How the labels were made: graded by me, Bharath Mandha, on 2026-11-02, without AI tools and without seeing the judge's verdict on any of these answers. One grader and one pass, so there is no inter-rater agreement. An earlier AI-assisted draft sits in `labels.csv` and is no longer scored.
