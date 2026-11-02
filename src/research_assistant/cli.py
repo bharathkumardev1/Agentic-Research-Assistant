@@ -139,7 +139,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
     res = run(papers, questions, recorder, embeddings, settings.answer_model, settings.review_model,
               settings.judge_model, settings.top_k, settings.run_deadline_seconds, settings.reasoning_effort or None,
-              on_row=progress, log=log)
+              on_row=progress, log=log, matched=args.matched)
     res = {"meta": meta(args.command_line, settings, embeddings, Path(args.data_dir)), "split": args.split,
            "sample": args.sample, "seed": args.seed, "questions": len(questions),
            "calls": {"made": recorder.made, "replayed": recorder.replayed},
@@ -289,6 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--record", default="results/qasper/calls.jsonl", help="model replies")
     p.add_argument("--log", default="results/qasper/runs.jsonl", help="searches and how each run stopped")
     p.add_argument("--replay", action="store_true", help="recorded replies only; no API key needed")
+    p.add_argument("--matched", action="store_true",
+                   help="also run single passes that see 10 and 15 passages, to match the loop's context")
     p.add_argument("--cap", type=float, default=25.0, help="USD, over everything in the recording")
     p.add_argument("--out", help="default results/qasper-<split>.json")
     p.set_defaults(func=_cmd_eval)

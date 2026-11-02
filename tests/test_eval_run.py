@@ -211,3 +211,54 @@ def test_results_say_who_made_the_judge_labels(tmp_path):
     (tmp_path / "qasper-dev.json").write_text(json.dumps(res))
     write_markdown(tmp_path, tmp_path / "RESULTS.md")
     assert "How the labels were made: pending an independent grade." in (tmp_path / "RESULTS.md").read_text()
+
+
+def evaluate_matched(client, log=None, only=None):
+    papers = Q.load(MINI)
+    return run(papers, sample(papers, None), client, HashingEmbeddings(256), "stub", "stub", "stub", top_k=2,
+               log=log, matched=True, only=only)
+
+
+def test_matched_baselines_see_more_passages_and_are_paired_with_the_loop(tmp_path):
+    from research_assistant.eval.run import MATCHED
+
+    plain = evaluate(Recorder(tmp_path / "plain.jsonl", StubClient()))
+    assert "matched" not in plain and "loop_minus_matched" not in plain["summary"]
+    res = evaluate_matched(Recorder(tmp_path / "calls.jsonl", StubClient()))
+    names = ["single pass", "loop", *MATCHED]
+    assert [(r["question_id"], r["system"]) for r in res["rows"]] == [(q, s) for q in ("q1", "q2", "q3") for s in names]
+    systems = res["summary"]["systems"]
+    # The matched baselines make the same one answer call as the single pass, with more context.
+    assert all(systems[n]["calls_per_question"] == 1.0 for n in MATCHED)
+    assert systems["single pass, top 10"]["passages_mean"] > systems["single pass"]["passages_mean"]
+    assert systems["single pass, top 15"]["passages_mean"] >= systems["single pass, top 10"]["passages_mean"]
+    assert systems["single pass"]["passages_mean"] <= 2
+    # The existing two-system comparison is the same numbers with or without the extra systems.
+    assert res["summary"]["loop_minus_single"] == plain["summary"]["loop_minus_single"]
+    assert set(res["summary"]["loop_minus_matched"]) == set(MATCHED)
+    assert set(res["summary"]["loop_minus_matched"]["single pass, top 15"]) == {
+        "answer_f1", "evidence_f1", "judge_accuracy"}
+
+
+def test_a_matched_run_replays_without_a_client_and_matches_its_results(tmp_path):
+    first = stub_meta(evaluate_matched(Recorder(tmp_path / "calls.jsonl", StubClient()), RunLog(tmp_path / "runs.jsonl")))
+    only = {(r["question_id"], r["system"]) for r in first["rows"]}
+    again = stub_meta(evaluate_matched(Recorder(tmp_path / "calls.jsonl"), RunLog(tmp_path / "runs.jsonl", write=False),
+                                       only=only))
+    assert differences(first, again) == []
+    # Replaying only the original two systems does not pull the matched ones in.
+    two = {k for k in only if k[1] in ("single pass", "loop")}
+    papers = Q.load(MINI)
+    base = run(papers, sample(papers, None), Recorder(tmp_path / "calls.jsonl"), HashingEmbeddings(256), "stub",
+               "stub", "stub", top_k=2, log=RunLog(tmp_path / "runs.jsonl", write=False), only=two)
+    assert {r["system"] for r in base["rows"]} == {"single pass", "loop"}
+
+
+def test_results_report_the_matched_comparison(tmp_path):
+    from research_assistant.eval.report import section
+
+    res = stub_meta(evaluate_matched(Recorder(tmp_path / "calls.jsonl", StubClient())))
+    res.update(recorded_spend_usd=0.0, cap_usd=5.0, questions=3, seed=0, sample=3)
+    res["meta"].update(reasoning_effort="low", top_k=2, embeddings="hashing-256", git_dirty=False)
+    text = section(res)
+    assert "Loop minus single pass, top 15" in text and "| single pass, top 10 |" in text
