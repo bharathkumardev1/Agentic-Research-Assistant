@@ -1,6 +1,6 @@
 # The 40 judge labels
 
-Status: graded by me, Bharath Mandha, on 2026-11-02, by hand and without seeing the judge's verdict on any of these answers. One grader and one pass, and the grader also ran the experiments, so there is no inter-rater agreement and this is not external validation. An earlier draft, which was not an independent grade, sits in `labels.csv` and is no longer scored.
+Status: graded by me, Bharath Mandha, by hand and without seeing the judge's verdict on any of these answers. The sheet was committed on 2026-11-02. One grader and one pass, and the grader also ran the experiments, so there is no inter-rater agreement and this is not external validation. An earlier draft, which was not an independent grade, sits in `labels.csv` and is no longer scored.
 
 ## The independent grade
 
@@ -22,7 +22,7 @@ research-assistant judge-agreement --results results/qasper-test.json --labels r
 
 The file name means independent of the earlier draft and of the judge's verdicts. It does not mean an outside annotator. I am the person who ran the experiments, there is one grader, and I had seen the aggregate judged accuracy before grading. The answers come from `gpt-6-luna` and the judge is `gpt-6.1-sol`, both OpenAI models, and I have not tested whether the judge favors answers from its own provider.
 
-I graded the sheet on the morning of 2 November, before the commits that describe it. Their timestamps show the order I pushed them (this file at 09:29 CT, the sheet at 09:45), not the order of events. The earlier draft also agreed with the judge on 35 of 40 answers (87.5%, kappa 0.74). That is a different sample that shares only 3 rows with this sheet, so the matching counts do not come from reusing one sheet.
+I do not have a record of when I did the grading relative to the commits. The repository records when the files were committed on 2 November 2026: the commit that describes the independent grade at 09:21 CT, the matched-context results at 09:39 CT and the sheet at 09:45 CT. Those are commit times from my own machine, not the order or time of the grading, and they are not attested by a third party. The earlier draft also agreed with the judge on 35 of 40 answers (87.5%, kappa 0.74). That is a different sample that shares only 3 rows with this sheet, so the matching counts do not come from reusing one sheet.
 
 ## The earlier draft
 
