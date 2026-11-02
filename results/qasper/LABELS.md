@@ -1,6 +1,6 @@
 # The 40 judge labels
 
-Status: graded by me, Bharath Mandha, on 2026-11-02, without AI tools and without seeing the judge's verdict on any of these answers. One grader and one pass, so there is no inter-rater agreement. An earlier AI-assisted draft sits in `labels.csv` and is no longer scored.
+Status: graded by me, Bharath Mandha, on 2026-11-02, by hand and without seeing the judge's verdict on any of these answers. One grader and one pass, so there is no inter-rater agreement. An earlier draft, which was not an independent grade, sits in `labels.csv` and is no longer scored.
 
 ## The independent grade
 
@@ -18,9 +18,9 @@ research-assistant label-judge --results results/qasper-test.json --out results/
 research-assistant judge-agreement --results results/qasper-test.json --labels results/qasper/labels-independent.csv
 ```
 
-## The earlier AI-assisted draft
+## The earlier draft
 
-`labels.csv` holds 40 judged test answers sampled earlier from the single-pass and loop rows only, with the `your_verdict` column filled in from an AI-assisted grading draft. Against the judge it gave 87.5% agreement and a kappa of 0.74, which is agreement between two model-assisted graders and says nothing about people. It covers 36 distinct questions and applies a stricter standard than the judge's rubric in several rows. Ten rows were borderline under the judge's rubric: the five where the draft and the judge disagreed, and five where they agreed but the answer is arguable.
+`labels.csv` holds 40 judged test answers sampled earlier from the single-pass and loop rows only, with the `your_verdict` column filled in from a grading draft that was not an independent human grade. Against the judge it gave 87.5% agreement and a kappa of 0.74, which says nothing about how a person would grade. It covers 36 distinct questions and applies a stricter standard than the judge's rubric in several rows. Ten rows were borderline under the judge's rubric: the five where the draft and the judge disagreed, and five where they agreed but the answer is arguable.
 
 | Question | System | Label | Judge | Why it needs a second look |
 |---|---|---|---|---|
