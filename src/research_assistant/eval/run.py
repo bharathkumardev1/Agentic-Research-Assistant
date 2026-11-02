@@ -36,6 +36,9 @@ from . import qasper as Q
 from .runlog import LoggedRetriever, RecordedStop, RunLog
 
 SYSTEMS = {"single pass": 1, "loop": 3}
+# Matched-context baselines: one round, but k passages from the first search instead of 5, so the
+# single pass can see as much text as the loop does after its extra searches. Run with --matched.
+MATCHED = {"single pass, top 10": 10, "single pass, top 15": 15}
 BOOTSTRAP = 10_000
 # Reasoning tokens count against the output allowance, and a reply cut short fails the call.
 # Raising it later would change every request's hash and void the recording, so it's generous
@@ -114,10 +117,15 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
         answer_model: str, review_model: str, judge_model: str, top_k: int = 5,
         deadline_seconds: Optional[float] = 120.0, reasoning_effort: Optional[str] = "low",
         on_row: Optional[Callable[[Dict[str, Any]], None]] = None, log: Optional[RunLog] = None,
-        only: Optional[Set[Tuple[str, str]]] = None) -> Dict[str, Any]:
+        only: Optional[Set[Tuple[str, str]]] = None, matched: bool = False) -> Dict[str, Any]:
     """``only`` limits the run to these (question id, system) pairs, which is how a replay
     covers exactly what a results file has, even when the cap stopped that run partway."""
     by_paper = {p.paper_id: p for p in papers}
+    if only is not None:  # a replay covers the matched baselines a results file has
+        matched = matched or any(system in MATCHED for _, system in only)
+    plan = [(name, rounds, top_k) for name, rounds in SYSTEMS.items()]
+    if matched:
+        plan += [(name, 1, k) for name, k in MATCHED.items()]
     stores: Dict[str, VectorStore] = {}
     rows: List[Dict[str, Any]] = []
     stopped = None
@@ -126,19 +134,21 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
         if q.paper_id not in stores:
             stores[q.paper_id] = VectorStore(embeddings)
             stores[q.paper_id].add(paper.paragraphs)
-        retriever = (LoggedRetriever(stores[q.paper_id], top_k, log, q.paper_id) if log is not None
-                     else RetrieverAgent(stores[q.paper_id], top_k))
-        pipe = pipeline(retriever, client, answer_model, review_model, reasoning_effort, deadline_seconds)
+        def make_pipe(k: int, paper_id: str = q.paper_id) -> ResearchPipeline:
+            retriever = (LoggedRetriever(stores[paper_id], k, log, paper_id) if log is not None
+                         else RetrieverAgent(stores[paper_id], k))
+            return pipeline(retriever, client, answer_model, review_model, reasoning_effort, deadline_seconds)
+
         text_of = {c.chunk_id: c.text for c in paper.paragraphs}
         gold = set().union(*(a.evidence for a in q.answers))
-        for system, rounds in SYSTEMS.items():
+        for system, rounds, k in plan:
             if only is not None and (q.question_id, system) not in only:
                 continue
             # Both systems send the same first-round request, so the loop's first answer is the
             # single pass's answer replayed: the comparison isolates what the review rounds add.
             stop = log.stop(q.question_id, system) if log is not None else None
             t0 = time.perf_counter()
-            result = pipe.run(q.text, max_rounds=rounds, trace=RecordedStop(stop) if stop else None)
+            result = make_pipe(k).run(q.text, max_rounds=rounds, trace=RecordedStop(stop) if stop else None)
             if result.status == "budget":
                 stopped = f"spending cap reached at {q.question_id} ({system})"
                 break
@@ -152,6 +162,7 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
                 "question_id": q.question_id, "paper_id": q.paper_id, "system": system, "answer": answer,
                 "evidence_ids": [] if declined else [s.chunk_id for s in result.cited],
                 **Q.score(q, answer, evidence),
+                "passages": len(result.sources),
                 "gold_unanswerable": q.unanswerable, "declined": declined,
                 "gold_retrieved": bool(gold & retrieved), "gold_cited": bool(gold & set(evidence)),
                 "status": result.status, "rounds": result.rounds, "seconds": round(time.perf_counter() - t0, 3),
@@ -166,7 +177,8 @@ def run(papers: List[Q.Paper], questions: List[Q.Question], client: LLMClient, e
                 on_row(row)
         if stopped:
             break
-    return {"systems": SYSTEMS, "rows": rows, "summary": summarize(rows), "stopped": stopped}
+    return {"systems": SYSTEMS, **({"matched": MATCHED} if matched else {}), "rows": rows,
+            "summary": summarize(rows), "stopped": stopped}
 
 
 def bootstrap_ci(values: np.ndarray, n: int = BOOTSTRAP, seed: int = 0) -> List[float]:
@@ -178,7 +190,7 @@ def bootstrap_ci(values: np.ndarray, n: int = BOOTSTRAP, seed: int = 0) -> List[
 
 def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {"systems": {}, "loop_minus_single": {}}
-    for system in SYSTEMS:
+    for system in [*SYSTEMS, *MATCHED]:
         rs = [r for r in rows if r["system"] == system]
         if not rs:
             continue
@@ -202,6 +214,7 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "seconds_p50": float(np.percentile(seconds, 50)), "seconds_p95": float(np.percentile(seconds, 95)),
             "usd_per_question": float(col("cost_usd").mean() + np.mean([r.get("judge_cost_usd", 0.0) for r in rs])),
             "answering_usd_per_question": float(col("cost_usd").mean()),
+            **({"passages_mean": float(np.mean([r["passages"] for r in rs]))} if all("passages" in r for r in rs) else {}),
             "calls_per_question": float(col("calls").mean()), "rounds_mean": float(col("rounds").mean()),
             "status": {s: sum(r["status"] == s for r in rs) for s in sorted({r["status"] for r in rs})},
             "failures": {f: sum(r["failure"] == f for r in rs) for f in sorted({r["failure"] for r in rs})},
@@ -209,17 +222,26 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     pairs: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for r in rows:
         pairs.setdefault(r["question_id"], {})[r["system"]] = r
-    both = [p for p in pairs.values() if len(p) == len(SYSTEMS)]
+
     def value(r: Dict[str, Any], metric: str) -> float:
         return float(r["verdict"] == "correct") if metric == "verdict" else float(r[metric])
 
-    for metric in ("answer_f1", "evidence_f1", "verdict"):
-        if not both:
-            break
-        d = np.array([value(p["loop"], metric) - value(p["single pass"], metric) for p in both])
-        name = "judge_accuracy" if metric == "verdict" else metric
-        out["loop_minus_single"][name] = {"diff": float(d.mean()), "ci95": bootstrap_ci(d),
-                                          "loop_better": int((d > 0).sum()), "single_better": int((d < 0).sum())}
+    def paired(baseline: str) -> Dict[str, Any]:
+        both = [p for p in pairs.values() if "loop" in p and baseline in p]
+        res: Dict[str, Any] = {}
+        for metric in ("answer_f1", "evidence_f1", "verdict"):
+            if not both:
+                break
+            d = np.array([value(p["loop"], metric) - value(p[baseline], metric) for p in both])
+            name = "judge_accuracy" if metric == "verdict" else metric
+            res[name] = {"diff": float(d.mean()), "ci95": bootstrap_ci(d),
+                         "loop_better": int((d > 0).sum()), "single_better": int((d < 0).sum())}
+        return res
+
+    out["loop_minus_single"] = paired("single pass")
+    for name in MATCHED:
+        if any(name in p for p in pairs.values()):
+            out.setdefault("loop_minus_matched", {})[name] = paired(name)
     return out
 
 
@@ -285,4 +307,8 @@ def differences(expected: Dict[str, Any], actual: Dict[str, Any]) -> List[str]:
         if not _same(v, actual["summary"]["loop_minus_single"].get(k)):
             out.append(f"loop minus single {k}: expected {v!r}, replayed "
                        f"{actual['summary']['loop_minus_single'].get(k)!r}")
+    for base, metrics in expected["summary"].get("loop_minus_matched", {}).items():
+        got = actual["summary"].get("loop_minus_matched", {}).get(base, {})
+        out += [f"loop minus {base} {k}: expected {v!r}, replayed {got.get(k)!r}"
+                for k, v in metrics.items() if not _same(v, got.get(k))]
     return out

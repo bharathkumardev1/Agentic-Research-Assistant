@@ -62,6 +62,16 @@ Run on 2026-10-28 at commit `daac2a1`, seed 0, 150 dev and 150 test questions; t
 
 The loop scores a little higher on every measure and the difference is within noise. Paired by question, the 95% interval on the answer F1 difference is -0.011 to +0.037 on dev and -0.015 to +0.029 on test. Evidence F1 on test is +0.024 (-0.003 to +0.051), and judged accuracy on test is +2.7 points (0.000 to +0.060), which is 5 questions where the loop was right and the single pass wrong against 1 the other way. With six comparisons, I don't read any of those as a finding. The loop ran 2.5 calls per question against 1, answering cost about three times as much per question ($0.00028 against $0.00009 on test), and the slowest 5% of questions took about 11 seconds against 2 to 3. Counting judging, the dollars per question differ by about 20% ($0.0011 against $0.0009), because judging dominates the bill. On this sample I can't say the loop is worth its extra calls.
 
+## A fairer baseline: the same amount of context
+
+The loop answers from up to three searches of 5 passages, so on some questions it reads up to 15 passages while the single pass reads 5. The 150-question result above doesn't separate "the review helped" from "it saw more text". `--matched` adds two single-pass baselines that make one answer call over the top 10 or the top 15 passages of the first search, and pairs each against the loop by question with the same bootstrap.
+
+```
+make eval-matched   # replays the loop and single-pass rows from the recording; only the 2 x 150 new answers (and their judge calls) hit the API
+```
+
+At the recorded cost of about $0.001 a question this should come to well under $1. The matched baselines were added after the test results above were seen, so the test-set comparison is post hoc. The dev comparison is the one to read first. Until `make eval-matched` has been run and its results committed, this repo has no matched-context result, and the claim above stays "the loop is within noise of a single pass at 5 passages".
+
 ## Rerunning the numbers without a key
 
 Every model reply is recorded under a hash of its request in `results/qasper/calls.jsonl`, and every search and how each run stopped go to `results/qasper/runs.jsonl`. `research-assistant check-replay results/qasper-test.json` reruns the evaluation from those files with no API key and lists every answer, citation or score that comes out different. CI does this on every push once a recording is committed.

@@ -63,6 +63,12 @@ def section(res: Dict[str, Any], labels_status: Optional[str] = None) -> str:
                   "| Metric | Difference | 95% CI | Loop better | Single pass better |\n|---|---|---|---|---|"]
         lines += [f"| {k} | {v['diff']:+.3f} | {v['ci95'][0]:+.3f} to {v['ci95'][1]:+.3f} | {v['loop_better']} | "
                   f"{v['single_better']} |" for k, v in s["loop_minus_single"].items()]
+    for base, metrics in s.get("loop_minus_matched", {}).items():
+        lines += ["", f"Loop minus {base} (the baseline sees as many passages as the loop's extra searches add), "
+                      "paired by question:\n",
+                  "| Metric | Difference | 95% CI | Loop better | Baseline better |\n|---|---|---|---|---|"]
+        lines += [f"| {k} | {v['diff']:+.3f} | {v['ci95'][0]:+.3f} to {v['ci95'][1]:+.3f} | {v['loop_better']} | "
+                  f"{v['single_better']} |" for k, v in metrics.items()]
     lines += ["", "Where answers went wrong (first failing stage):\n",
               "| System | " + " | ".join(sorted({f for v in s["systems"].values() for f in v["failures"]})) + " |"]
     kinds = sorted({f for v in s["systems"].values() for f in v["failures"]})

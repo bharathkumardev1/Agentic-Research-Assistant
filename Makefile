@@ -1,7 +1,7 @@
 # Usage: make <target>. The eval targets call the API and spend money; everything else is offline.
 
 .DEFAULT_GOAL := help
-.PHONY: help install test lint demo qasper eval-dev eval-test check-replay labels agreement replay lock image
+.PHONY: help install test lint demo qasper eval-dev eval-test eval-matched check-replay labels agreement replay lock image
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-13s %s\n", $$1, $$2}'
@@ -24,6 +24,10 @@ eval-dev: ## QASPER dev sample, 150 questions; needs OPENAI_API_KEY, $25 default
 
 eval-test: ## QASPER test sample, 150 questions; run once, after dev settled every choice
 	research-assistant eval --split test
+
+eval-matched: ## Add single passes that see 10 and 15 passages to both results files; the loop and single-pass rows replay from the recording, only the new ones call the API
+	research-assistant eval --split dev --cap 5 --matched
+	research-assistant eval --split test --cap 5 --matched
 
 check-replay: ## Rerun every results file from the recording with no key and compare
 	for f in results/qasper-*.json; do research-assistant check-replay $$f || exit 1; done
