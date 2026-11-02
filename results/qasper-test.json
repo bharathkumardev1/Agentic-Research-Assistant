@@ -19921,5 +19921,13 @@
    }
   }
  },
- "stopped": null
+ "stopped": null,
+ "judge_check": {
+  "labels": "results/qasper/labels-independent.csv",
+  "labeled": 40,
+  "agreement": 0.875,
+  "cohens_kappa": 0.75,
+  "judge_lenient": 2,
+  "judge_strict": 3
+ }
 }
