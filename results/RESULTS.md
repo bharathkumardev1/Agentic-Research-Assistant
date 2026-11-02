@@ -90,4 +90,4 @@ Where answers went wrong (first failing stage):
 
 The judge agreed with the 40 labels in `results/qasper/labels-independent.csv` on 87.5% of answers (Cohen's kappa 0.75); it passed 2 the labels failed and failed 3 the labels passed.
 
-How the labels were made: graded by me, Bharath Mandha, on 2026-11-02, by hand and without seeing the judge's verdict on any of these answers. One grader and one pass, so there is no inter-rater agreement. An earlier draft, which was not an independent grade, sits in `labels.csv` and is no longer scored.
+How the labels were made: graded by me, Bharath Mandha, on 2026-11-02, by hand and without seeing the judge's verdict on any of these answers. One grader and one pass, and the grader also ran the experiments, so there is no inter-rater agreement and this is not external validation. An earlier draft, which was not an independent grade, sits in `labels.csv` and is no longer scored.
