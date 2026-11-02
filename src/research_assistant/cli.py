@@ -227,6 +227,21 @@ def _cmd_judge_agreement(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_carry_timings(args: argparse.Namespace) -> int:
+    import json
+
+    from .eval.report import write_markdown
+    from .eval.run import carry_timings
+
+    path = Path(args.results)
+    res = json.loads(path.read_text())
+    changed = carry_timings(res, json.loads(Path(args.previous).read_text()))
+    path.write_text(json.dumps(res, indent=1) + "\n")
+    write_markdown(path.parent, path.parent / "RESULTS.md")
+    print(f"{changed} rows got their measured seconds back from {args.previous}")
+    return 0
+
+
 def _cmd_export_replay(args: argparse.Namespace) -> int:
     import json
 
@@ -313,6 +328,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--results", default="results/qasper-test.json")
     p.add_argument("--labels", default="results/qasper/labels.csv")
     p.set_defaults(func=_cmd_judge_agreement)
+
+    p = sub.add_parser("carry-timings", help="put measured seconds from an earlier results file back on replayed rows")
+    p.add_argument("--results", default="results/qasper-test.json")
+    p.add_argument("--previous", required=True, help="the earlier file, e.g. from `git show HEAD:results/qasper-test.json`")
+    p.set_defaults(func=_cmd_carry_timings)
 
     p = sub.add_parser("export-replay", help="recorded runs as JSON for the site's replay, no key needed")
     p.add_argument("--results", default="results/qasper-test.json")

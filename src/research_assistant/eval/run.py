@@ -245,6 +245,24 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def carry_timings(res: Dict[str, Any], previous: Dict[str, Any]) -> int:
+    """Copy wall time from an earlier results file onto rows that were replayed, not run.
+
+    A replay doesn't wait on the API, so its seconds are near zero. Rows that exist in the earlier file keep the
+    seconds measured when they were really run; rows that are new keep their own. Returns how many rows changed.
+    """
+    before = {(r["question_id"], r["system"]): r["seconds"] for r in previous["rows"]}
+    changed = 0
+    for r in res["rows"]:
+        key = (r["question_id"], r["system"])
+        if key in before and r["seconds"] != before[key]:
+            r["seconds"] = before[key]
+            changed += 1
+    if changed:
+        res["summary"] = summarize(res["rows"])
+    return changed
+
+
 def label_sheet(results: Dict[str, Any], questions: Dict[str, Q.Question], n: int = 40, seed: int = 0
                 ) -> List[Dict[str, str]]:
     """Judged answers, verdict hidden, for a person to grade; exact matches are left out."""
@@ -259,6 +277,12 @@ def agreement(results: Dict[str, Any], labels_csv: str) -> Dict[str, Any]:
     verdicts = {(r["question_id"], r["system"]): r["verdict"] for r in results["rows"]}
     with open(labels_csv, newline="", encoding="utf8") as fh:
         labels = [row for row in csv.DictReader(fh) if row["your_verdict"].strip()]
+    bad = [row["your_verdict"] for row in labels if row["your_verdict"].strip().lower() not in ("correct", "incorrect")]
+    if bad:
+        raise ValueError(f"your_verdict must be correct or incorrect; got {sorted(set(bad))}")
+    missing = [(row["question_id"], row["system"]) for row in labels if (row["question_id"], row["system"]) not in verdicts]
+    if missing:
+        raise ValueError(f"{len(missing)} labelled answers are not in the results file, e.g. {missing[0]}")
     pairs = [(row["your_verdict"].strip().lower(), verdicts[(row["question_id"], row["system"])]) for row in labels]
     if not pairs:
         return {"labeled": 0}
