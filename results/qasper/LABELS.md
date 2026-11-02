@@ -1,16 +1,16 @@
 # The 40 judge labels
 
-Status: an AI-assisted draft, not independent human annotation. An independent grade is pending.
+Status: graded by me, Bharath Mandha, on 2026-11-02, without AI tools and without seeing the judge's verdict on any of these answers. One grader and one pass, so there is no inter-rater agreement. An earlier AI-assisted draft sits in `labels.csv` and is no longer scored.
 
-`labels.csv` holds 40 judged test answers, sampled with seed 0 from the 232 test answers that went to the judge (exact matches skip it). The `your_verdict` column was filled in from an AI-assisted grading draft, so agreement with the judge here is agreement between two model-assisted graders. It does not show that the judge matches people.
+## The independent grade
 
-Three things limit what the 40 labels can show:
+`labels-independent.csv` holds 40 judged test answers, sampled with seed 0 from the test answers that went to the judge (exact matches skip it). I graded each from three things only: the question, the annotators' answers and the answer, using the judge's rubric as written. I had not seen any per-answer judge verdict. I had seen the aggregate judged accuracy in `RESULTS.md`.
 
-- Four questions appear twice, once per system, with near-identical answers, so the sample is 36 distinct questions.
-- Several labels apply a stricter standard than the judge's rubric, which accepts an answer that matches any one annotator whatever its extra detail.
-- Ten rows are borderline under the judge's rubric and need a second look: the five where the judge and the label disagree, and five where they agree but the answer is arguable. They are in the table below.
+The sheet was made after the matched-context run, so the judged pool includes the two matched single-pass systems. The sample is 40 rows over 37 distinct questions: 12 single pass, 10 single pass top 10, 11 single pass top 15 and 7 loop. It shares only 3 rows with the earlier draft's 40, so the two sets are not comparable row by row. Because the same question can appear under several systems with near-identical answers, the 40 labels carry less information than 40 independent questions would.
 
-To replace this with an independent grade, make a blank sheet of the same 40 answers without overwriting `labels.csv`, grade it blind with the judge's rubric next to you, and score it:
+`research-assistant judge-agreement --results results/qasper-test.json --labels results/qasper/labels-independent.csv` writes agreement and Cohen's kappa into `results/qasper-test.json` and `RESULTS.md`. That replaces the figure computed from the draft.
+
+To regrade, make a fresh sheet and score it:
 
 ```
 research-assistant label-judge --results results/qasper-test.json --out results/qasper/labels-independent.csv
@@ -18,7 +18,9 @@ research-assistant label-judge --results results/qasper-test.json --out results/
 research-assistant judge-agreement --results results/qasper-test.json --labels results/qasper/labels-independent.csv
 ```
 
-`judge-agreement` writes its result into `results/qasper-test.json` and regenerates `RESULTS.md`, so commit that as a separate change, and update the status line above to say who graded.
+## The earlier AI-assisted draft
+
+`labels.csv` holds 40 judged test answers sampled earlier from the single-pass and loop rows only, with the `your_verdict` column filled in from an AI-assisted grading draft. Against the judge it gave 87.5% agreement and a kappa of 0.74, which is agreement between two model-assisted graders and says nothing about people. It covers 36 distinct questions and applies a stricter standard than the judge's rubric in several rows. Ten rows were borderline under the judge's rubric: the five where the draft and the judge disagreed, and five where they agreed but the answer is arguable.
 
 | Question | System | Label | Judge | Why it needs a second look |
 |---|---|---|---|---|
