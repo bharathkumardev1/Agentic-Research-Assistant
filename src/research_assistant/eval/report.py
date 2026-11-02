@@ -8,6 +8,7 @@ import platform
 import subprocess
 import time
 from importlib.metadata import version
+from math import comb
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -40,6 +41,15 @@ def _ci(ci: list) -> str:
     return f"{ci[0]:.3f} to {ci[1]:.3f}"
 
 
+def sign_test_p(a: int, b: int) -> float:
+    """Exact two-sided sign test on the questions where one system was better. For judged accuracy this is
+    McNemar's exact test; for the F1 metrics it ignores ties and the size of each difference."""
+    n = a + b
+    if n == 0:
+        return 1.0
+    return min(1.0, 2 * sum(comb(n, i) for i in range(min(a, b) + 1)) / 2 ** n)
+
+
 def section(res: Dict[str, Any], labels_status: Optional[str] = None) -> str:
     m, s = res["meta"], res["summary"]
     lines = [
@@ -51,24 +61,27 @@ def section(res: Dict[str, Any], labels_status: Optional[str] = None) -> str:
         f"${res['recorded_spend_usd']:.2f} of a ${res['cap_usd']:.0f} cap"
         + (f"; stopped early: {res['stopped']}" if res.get("stopped") else "") + ".\n",
         "| System | Answer F1 (95% CI) | Evidence F1 (95% CI) | Evidence P / R | Judged correct (95% CI) "
-        "| $ per question | p50 / p95 seconds | Calls per question |\n|---|---|---|---|---|---|---|---|",
+        "| $ per question | p50 / p95 seconds | Calls per question | Passages per question |\n|---|---|---|---|---|---|---|---|---|",
     ]
     for name, v in s["systems"].items():
         lines.append(f"| {name} | {v['answer_f1']:.3f} ({_ci(v['answer_f1_ci95'])}) | {v['evidence_f1']:.3f} "
                      f"({_ci(v['evidence_f1_ci95'])}) | {v['evidence_precision']:.2f} / {v['evidence_recall']:.2f} | "
                      f"{v['judge_accuracy']:.3f} ({_ci(v['judge_accuracy_ci95'])}) | {v['usd_per_question']:.4f} | "
-                     f"{v['seconds_p50']:.1f} / {v['seconds_p95']:.1f} | {v['calls_per_question']:.1f} |")
+                     f"{v['seconds_p50']:.1f} / {v['seconds_p95']:.1f} | {v['calls_per_question']:.1f} | "
+                     + (f"{v['passages_mean']:.1f}" if v.get("passages_mean") is not None else "n/a") + " |")
     if s["loop_minus_single"]:
         lines += ["", "Loop minus single pass, paired by question (10,000 bootstrap resamples):\n",
-                  "| Metric | Difference | 95% CI | Loop better | Single pass better |\n|---|---|---|---|---|"]
+                  "| Metric | Difference | 95% CI | Loop better | Single pass better | Sign-test p |\n|---|---|---|---|---|---|"]
         lines += [f"| {k} | {v['diff']:+.3f} | {v['ci95'][0]:+.3f} to {v['ci95'][1]:+.3f} | {v['loop_better']} | "
-                  f"{v['single_better']} |" for k, v in s["loop_minus_single"].items()]
+                  f"{v['single_better']} | {sign_test_p(v['loop_better'], v['single_better']):.3f} |"
+                  for k, v in s["loop_minus_single"].items()]
     for base, metrics in s.get("loop_minus_matched", {}).items():
         lines += ["", f"Loop minus {base} (the baseline sees as many passages as the loop's extra searches add), "
                       "paired by question:\n",
-                  "| Metric | Difference | 95% CI | Loop better | Baseline better |\n|---|---|---|---|---|"]
+                  "| Metric | Difference | 95% CI | Loop better | Baseline better | Sign-test p |\n|---|---|---|---|---|---|"]
         lines += [f"| {k} | {v['diff']:+.3f} | {v['ci95'][0]:+.3f} to {v['ci95'][1]:+.3f} | {v['loop_better']} | "
-                  f"{v['single_better']} |" for k, v in metrics.items()]
+                  f"{v['single_better']} | {sign_test_p(v['loop_better'], v['single_better']):.3f} |"
+                  for k, v in metrics.items()]
     lines += ["", "Where answers went wrong (first failing stage):\n",
               "| System | " + " | ".join(sorted({f for v in s["systems"].values() for f in v["failures"]})) + " |"]
     kinds = sorted({f for v in s["systems"].values() for f in v["failures"]})

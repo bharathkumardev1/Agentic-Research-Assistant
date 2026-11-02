@@ -262,3 +262,64 @@ def test_results_report_the_matched_comparison(tmp_path):
     res["meta"].update(reasoning_effort="low", top_k=2, embeddings="hashing-256", git_dirty=False)
     text = section(res)
     assert "Loop minus single pass, top 15" in text and "| single pass, top 10 |" in text
+
+
+def test_agreement_rejects_a_verdict_that_is_not_correct_or_incorrect(tmp_path):
+    res = evaluate(Recorder(tmp_path / "calls.jsonl", StubClient()))
+    questions = {q.question_id: q for p in Q.load(MINI) for q in p.questions}
+    sheet = label_sheet(res, questions, n=3)
+    sheet[0]["your_verdict"] = "yes"
+    path = tmp_path / "labels.csv"
+    with open(path, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(sheet[0]))
+        writer.writeheader()
+        writer.writerows(sheet)
+    with pytest.raises(ValueError, match="correct or incorrect"):
+        agreement(res, str(path))
+
+
+def test_agreement_rejects_a_label_for_an_answer_that_is_not_in_the_results(tmp_path):
+    res = evaluate(Recorder(tmp_path / "calls.jsonl", StubClient()))
+    questions = {q.question_id: q for p in Q.load(MINI) for q in p.questions}
+    sheet = label_sheet(res, questions, n=3)
+    sheet[0]["your_verdict"], sheet[0]["system"] = "correct", "not a system"
+    path = tmp_path / "labels.csv"
+    with open(path, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(sheet[0]))
+        writer.writeheader()
+        writer.writerows(sheet)
+    with pytest.raises(ValueError, match="not in the results"):
+        agreement(res, str(path))
+
+
+def test_carry_timings_restores_measured_seconds_on_replayed_rows_only(tmp_path):
+    from research_assistant.eval.run import carry_timings
+
+    res = evaluate(Recorder(tmp_path / "calls.jsonl", StubClient()))
+    previous = json.loads(json.dumps(res))
+    for r in previous["rows"]:
+        r["seconds"] = 7.5
+    res["rows"].append({**res["rows"][0], "question_id": "new", "seconds": 1.25})
+    changed = carry_timings(res, previous)
+    assert changed == len(previous["rows"])
+    assert [r["seconds"] for r in res["rows"][:-1]] == [7.5] * len(previous["rows"])
+    assert res["rows"][-1]["seconds"] == 1.25  # a row the earlier file didn't have keeps its own time
+    assert res["summary"]["systems"]["single pass"]["seconds_p95"] == 7.5
+
+
+def test_sign_test_p_matches_the_exact_binomial():
+    from research_assistant.eval.report import sign_test_p
+
+    assert sign_test_p(0, 0) == 1.0 and sign_test_p(5, 5) == 1.0
+    assert sign_test_p(9, 23) == pytest.approx(0.0201, abs=5e-4)
+    assert sign_test_p(1, 5) == pytest.approx(2 * (1 + 6) / 64)
+
+
+def test_the_report_shows_passages_per_question_and_the_sign_test(tmp_path):
+    from research_assistant.eval.report import section
+
+    res = stub_meta(evaluate_matched(Recorder(tmp_path / "calls.jsonl", StubClient())))
+    res.update(recorded_spend_usd=0.0, cap_usd=5.0, questions=3, seed=0, sample=3)
+    res["meta"].update(reasoning_effort="low", top_k=2, embeddings="hashing-256", git_dirty=False)
+    text = section(res)
+    assert "Passages per question" in text and "Sign-test p" in text
