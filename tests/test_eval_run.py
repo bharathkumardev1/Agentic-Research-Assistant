@@ -10,7 +10,14 @@ pytest.importorskip("langgraph", reason="langgraph not installed")
 
 from research_assistant.cli import main  # noqa: E402
 from research_assistant.eval import qasper as Q  # noqa: E402
-from research_assistant.eval.run import agreement, differences, failure, label_sheet, run, sample  # noqa: E402
+from research_assistant.eval.run import (  # noqa: E402
+    agreement,
+    differences,
+    failure,
+    label_sheet,
+    run,
+    sample,
+)
 from research_assistant.eval.runlog import RunLog, stop_key  # noqa: E402
 from research_assistant.llm import BudgetExceeded, Recorder, StubClient  # noqa: E402
 from research_assistant.rag.embeddings import HashingEmbeddings  # noqa: E402
