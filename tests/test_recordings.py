@@ -23,7 +23,7 @@ def test_the_only_hex_run_of_10_or_more_in_a_recording_line_is_its_key(name):
         key = record["key"]
         if re.fullmatch(r"[0-9a-f]{64}", key):  # a request hash, or a search hash
             expected = [key]
-        elif re.fullmatch(r"[0-9a-f]{40}\|(single pass|loop)", key):  # a stop: question id and system
+        elif re.fullmatch(r"[0-9a-f]{40}\|(single pass|loop|single pass, top [0-9]+)", key):  # a stop: question id and system (the matched baselines included)
             expected = [key.split("|")[0]]
         else:
             expected = []

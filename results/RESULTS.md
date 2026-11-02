@@ -2,7 +2,7 @@
 
 ## QASPER dev: 150 questions (seed 0)
 
-`research-assistant eval --split dev --cap 5 --matched` at commit `aac699e` on 2026-11-02. Answers and reviews by `gpt-6-luna`, grading by `gpt-6.1-sol` (reasoning effort low), top 5 passages per search, all-MiniLM-L6-v2 embeddings. Recorded spend $0.65 of a $5 cap.
+`research-assistant eval --split dev --cap 5 --matched` at commit `aac699e` on 2026-11-02. Answers and reviews by `gpt-6-luna`, grading by `gpt-6.1-sol` (reasoning effort low), top 5 passages per search, all-MiniLM-L6-v2 embeddings. Recorded spend so far (a running total over every recorded call, not this split alone): $0.65 of a $5 cap.
 
 | System | Answer F1 (95% CI) | Evidence F1 (95% CI) | Evidence P / R | Judged correct (95% CI) | $ per question | p50 / p95 seconds | Calls per question | Passages per question |
 |---|---|---|---|---|---|---|---|---|
@@ -19,7 +19,7 @@ Loop minus single pass, paired by question (10,000 bootstrap resamples):
 | evidence_f1 | +0.009 | -0.016 to +0.036 | 5 | 5 | 1.000 |
 | judge_accuracy | +0.013 | -0.020 to +0.047 | 4 | 2 | 0.688 |
 
-Loop minus single pass, top 10 (the baseline sees as many passages as the loop's extra searches add), paired by question:
+Loop minus single pass, top 10 (one call over a wider first retrieval; the loop's own passage count is in the table above), paired by question:
 
 | Metric | Difference | 95% CI | Loop better | Baseline better | Sign-test p |
 |---|---|---|---|---|---|
@@ -27,7 +27,7 @@ Loop minus single pass, top 10 (the baseline sees as many passages as the loop's
 | evidence_f1 | -0.063 | -0.119 to -0.006 | 15 | 29 | 0.049 |
 | judge_accuracy | -0.073 | -0.133 to -0.013 | 5 | 16 | 0.027 |
 
-Loop minus single pass, top 15 (the baseline sees as many passages as the loop's extra searches add), paired by question:
+Loop minus single pass, top 15 (one call over a wider first retrieval; the loop's own passage count is in the table above), paired by question:
 
 | Metric | Difference | 95% CI | Loop better | Baseline better | Sign-test p |
 |---|---|---|---|---|---|
@@ -46,7 +46,7 @@ Where answers went wrong (first failing stage):
 
 ## QASPER test: 150 questions (seed 0)
 
-`research-assistant eval --split test --cap 5 --matched` at commit `aac699e` on 2026-11-02. Answers and reviews by `gpt-6-luna`, grading by `gpt-6.1-sol` (reasoning effort low), top 5 passages per search, all-MiniLM-L6-v2 embeddings. Recorded spend $0.89 of a $5 cap.
+`research-assistant eval --split test --cap 5 --matched` at commit `aac699e` on 2026-11-02. Answers and reviews by `gpt-6-luna`, grading by `gpt-6.1-sol` (reasoning effort low), top 5 passages per search, all-MiniLM-L6-v2 embeddings. Recorded spend so far (a running total over every recorded call, not this split alone): $0.89 of a $5 cap.
 
 | System | Answer F1 (95% CI) | Evidence F1 (95% CI) | Evidence P / R | Judged correct (95% CI) | $ per question | p50 / p95 seconds | Calls per question | Passages per question |
 |---|---|---|---|---|---|---|---|---|
@@ -63,7 +63,7 @@ Loop minus single pass, paired by question (10,000 bootstrap resamples):
 | evidence_f1 | +0.024 | -0.003 to +0.051 | 10 | 2 | 0.039 |
 | judge_accuracy | +0.027 | +0.000 to +0.060 | 5 | 1 | 0.219 |
 
-Loop minus single pass, top 10 (the baseline sees as many passages as the loop's extra searches add), paired by question:
+Loop minus single pass, top 10 (one call over a wider first retrieval; the loop's own passage count is in the table above), paired by question:
 
 | Metric | Difference | 95% CI | Loop better | Baseline better | Sign-test p |
 |---|---|---|---|---|---|
@@ -71,7 +71,7 @@ Loop minus single pass, top 10 (the baseline sees as many passages as the loop's
 | evidence_f1 | -0.003 | -0.058 to +0.051 | 27 | 24 | 0.780 |
 | judge_accuracy | -0.093 | -0.167 to -0.020 | 9 | 23 | 0.020 |
 
-Loop minus single pass, top 15 (the baseline sees as many passages as the loop's extra searches add), paired by question:
+Loop minus single pass, top 15 (one call over a wider first retrieval; the loop's own passage count is in the table above), paired by question:
 
 | Metric | Difference | 95% CI | Loop better | Baseline better | Sign-test p |
 |---|---|---|---|---|---|
