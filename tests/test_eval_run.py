@@ -323,3 +323,11 @@ def test_the_report_shows_passages_per_question_and_the_sign_test(tmp_path):
     res["meta"].update(reasoning_effort="low", top_k=2, embeddings="hashing-256", git_dirty=False)
     text = section(res)
     assert "Passages per question" in text and "Sign-test p" in text
+
+
+def test_label_judge_refuses_to_overwrite_a_graded_sheet(tmp_path):
+    sheet = tmp_path / "labels-independent.csv"
+    sheet.write_text("question_id,system,question,annotators,answer,your_verdict\n")
+    with pytest.raises(SystemExit, match="already exists"):
+        main(["label-judge", "--out", str(sheet)])
+    assert sheet.read_text().startswith("question_id")

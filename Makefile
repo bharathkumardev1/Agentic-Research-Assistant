@@ -32,7 +32,7 @@ eval-matched: ## Add single passes that see 10 and 15 passages to both results f
 check-replay: ## Rerun every results file from the recording with no key and compare
 	for f in results/qasper-*.json; do research-assistant check-replay $$f || exit 1; done
 
-labels: ## 40 judged test answers for you to grade, verdicts hidden
+labels: ## 40 judged test answers for you to grade, verdicts hidden; refuses to overwrite an existing sheet
 	research-assistant label-judge
 
 agreement: ## How often the judge agreed with your grades

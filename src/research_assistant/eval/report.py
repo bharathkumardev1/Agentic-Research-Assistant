@@ -57,8 +57,9 @@ def section(res: Dict[str, Any], labels_status: Optional[str] = None) -> str:
         f"`{m['command']}` at commit `{(m['git_sha'] or 'unknown')[:7]}`"
         f"{' with uncommitted changes' if m['git_dirty'] else ''} on {m['date']}. Answers and reviews by "
         f"`{m['answer_model']}`, grading by `{m['judge_model']}` (reasoning effort {m['reasoning_effort']}), "
-        f"top {m['top_k']} passages per search, {m['embeddings']} embeddings. Recorded spend "
-        f"${res['recorded_spend_usd']:.2f} of a ${res['cap_usd']:.0f} cap"
+        f"top {m['top_k']} passages per search, {m['embeddings']} embeddings. Recorded spend so far "
+        f"(a running total over every recorded call, not this split alone): ${res['recorded_spend_usd']:.2f} of a "
+        f"${res['cap_usd']:.0f} cap"
         + (f"; stopped early: {res['stopped']}" if res.get("stopped") else "") + ".\n",
         "| System | Answer F1 (95% CI) | Evidence F1 (95% CI) | Evidence P / R | Judged correct (95% CI) "
         "| $ per question | p50 / p95 seconds | Calls per question | Passages per question |\n|---|---|---|---|---|---|---|---|---|",
@@ -76,8 +77,8 @@ def section(res: Dict[str, Any], labels_status: Optional[str] = None) -> str:
                   f"{v['single_better']} | {sign_test_p(v['loop_better'], v['single_better']):.3f} |"
                   for k, v in s["loop_minus_single"].items()]
     for base, metrics in s.get("loop_minus_matched", {}).items():
-        lines += ["", f"Loop minus {base} (the baseline sees as many passages as the loop's extra searches add), "
-                      "paired by question:\n",
+        lines += ["", f"Loop minus {base} (one call over a wider first retrieval; the loop's own passage count is in "
+                      "the table above), paired by question:\n",
                   "| Metric | Difference | 95% CI | Loop better | Baseline better | Sign-test p |\n|---|---|---|---|---|---|"]
         lines += [f"| {k} | {v['diff']:+.3f} | {v['ci95'][0]:+.3f} to {v['ci95'][1]:+.3f} | {v['loop_better']} | "
                   f"{v['single_better']} | {sign_test_p(v['loop_better'], v['single_better']):.3f} |"

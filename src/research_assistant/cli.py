@@ -197,6 +197,9 @@ def _cmd_label_judge(args: argparse.Namespace) -> int:
     import csv
     import json
 
+    if Path(args.out).exists():
+        raise SystemExit(f"{args.out} already exists; move it or pass --out so a graded sheet isn't overwritten")
+
     from .eval import qasper as Q
     from .eval.run import label_sheet
 
@@ -321,12 +324,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--results", default="results/qasper-test.json")
     p.add_argument("--data-dir", default="data/qasper")
     p.add_argument("--n", type=int, default=40)
-    p.add_argument("--out", default="results/qasper/labels.csv")
+    p.add_argument("--out", default="results/qasper/labels-independent.csv")
     p.set_defaults(func=_cmd_label_judge)
 
     p = sub.add_parser("judge-agreement", help="how often the judge agrees with your grades")
     p.add_argument("--results", default="results/qasper-test.json")
-    p.add_argument("--labels", default="results/qasper/labels.csv")
+    p.add_argument("--labels", default="results/qasper/labels-independent.csv")
     p.set_defaults(func=_cmd_judge_agreement)
 
     p = sub.add_parser("carry-timings", help="put measured seconds from an earlier results file back on replayed rows")
