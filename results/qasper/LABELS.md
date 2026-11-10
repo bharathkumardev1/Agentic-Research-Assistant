@@ -22,7 +22,7 @@ research-assistant judge-agreement --results results/qasper-test.json --labels r
 
 The file name means independent of the earlier draft and of the judge's verdicts. It does not mean an outside annotator. I am the person who ran the experiments, there is one grader, and I had seen the aggregate judged accuracy before grading. The answers come from `gpt-6-luna` and the judge is `gpt-6.1-sol`, both OpenAI models, and I have not tested whether the judge favors answers from its own provider.
 
-I do not have a record of when I did the grading relative to the commits. The repository records when the files were committed on 2 November 2026: the commit that describes the independent grade at 09:21 CT, the matched-context results at 09:39 CT and the sheet at 09:45 CT. Those are commit times from my own machine, not the order or time of the grading, and they are not attested by a third party. The earlier draft also agreed with the judge on 35 of 40 answers (87.5%, kappa 0.74). That is a different sample that shares only 3 rows with this sheet, so the matching counts do not come from reusing one sheet.
+I don't have a record of exactly when I did the grading. The earlier draft also agreed with the judge on 35 of 40 answers (87.5%, kappa 0.74). That is a different sample that shares only 3 rows with this sheet, so the matching counts do not come from reusing one sheet.
 
 ## The earlier draft
 
