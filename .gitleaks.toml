@@ -7,18 +7,18 @@ useDefault = true
 # "key": a hash of the request for calls.jsonl, and of [paper, query, k, embeddings] for the
 # searches in runs.jsonl. Gitleaks' generic-api-key rule reads each 64-hex value as a secret.
 #
-# `gitleaks dir` reads a file in chunks, and a chunk can end inside a hash, so a finding can
-# hold only the first 10 to 63 characters of one. The exception therefore takes hex values of
-# 10 to 64 characters.
-#
-# It needs all three conditions: the finding comes from generic-api-key, it is in one of those
-# two files, and the matched value is lowercase hex. A finding of any other rule, a
-# generic-api-key finding of any other shape, or one in any other file is still reported.
-# Needs gitleaks 8.25 or later for the `[[allowlists]]` table.
-[[allowlists]]
+# The exception is attached to generic-api-key itself, so it can't hide any other rule's
+# findings, and it needs both conditions: the finding is in one of those two files, and the
+# matched value is lowercase hex (10 to 64 characters, since `gitleaks dir` reads files in
+# chunks and can cut a hash). Any other secret in those files is still reported.
+# Checked on gitleaks 8.25 to 8.30.1 against the full history, and against keys planted in
+# the recordings.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
 description = "SHA-256 request hashes in the evaluation recordings"
 condition = "AND"
-targetRules = ["generic-api-key"]
 paths = [
   '''^results/qasper/(calls|runs)\.jsonl$''',
 ]
